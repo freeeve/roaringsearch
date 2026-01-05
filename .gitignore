@@ -1,0 +1,30 @@
+# Test binaries
+*.test
+
+# Profiling output
+*.prof
+*.out
+
+# Coverage
+coverage.out
+coverage.html
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Claude Code
+.claude/
+
+# Temporary files
+*.tmp
+*.temp
+
+# Built index files (for testing)
+*.ftsr
