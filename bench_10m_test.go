@@ -123,7 +123,7 @@ func getOrCreate10MIndexFile(b *testing.B) string {
 	idx := getOrCreate10MIndex(b)
 
 	tmpDir := os.TempDir()
-	path := filepath.Join(tmpDir, "bench_10m.ftsr")
+	path := filepath.Join(tmpDir, "bench_10m.sear")
 
 	b.Logf("Saving index to %s...", path)
 	start := time.Now()
@@ -351,7 +351,7 @@ func BenchmarkSerialize10M(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		path := filepath.Join(tmpDir, fmt.Sprintf("bench_%d.ftsr", i))
+		path := filepath.Join(tmpDir, fmt.Sprintf("bench_%d.sear", i))
 		if err := idx.SaveToFile(path); err != nil {
 			b.Fatalf("Failed to save: %v", err)
 		}

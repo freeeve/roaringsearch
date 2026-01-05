@@ -162,7 +162,7 @@ func TestFakerCachedIndex(t *testing.T) {
 
 	// Save to file
 	tmpDir := t.TempDir()
-	path := filepath.Join(tmpDir, "faker.ftsr")
+	path := filepath.Join(tmpDir, "faker.sear")
 
 	if err := idx.SaveToFile(path); err != nil {
 		t.Fatalf("SaveToFile failed: %v", err)
@@ -324,7 +324,7 @@ func BenchmarkFakerCachedSearch(b *testing.B) {
 	}
 
 	tmpDir := b.TempDir()
-	path := filepath.Join(tmpDir, "bench.ftsr")
+	path := filepath.Join(tmpDir, "bench.sear")
 	idx.SaveToFile(path)
 
 	cached, _ := OpenCachedIndex(path, WithCacheSize(100))
@@ -348,7 +348,7 @@ func BenchmarkFakerSerialize(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		path := filepath.Join(tmpDir, fmt.Sprintf("bench_%d.ftsr", i))
+		path := filepath.Join(tmpDir, fmt.Sprintf("bench_%d.sear", i))
 		idx.SaveToFile(path)
 	}
 }

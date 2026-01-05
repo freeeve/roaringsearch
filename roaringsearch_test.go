@@ -148,7 +148,7 @@ func TestSerialization(t *testing.T) {
 
 	// Save to temp file
 	tmpDir := t.TempDir()
-	path := filepath.Join(tmpDir, "test.ftsr")
+	path := filepath.Join(tmpDir, "test.sear")
 
 	err := idx.SaveToFile(path)
 	if err != nil {
@@ -324,7 +324,7 @@ func TestCachedIndexBasic(t *testing.T) {
 	idx.Add(3, "world peace")
 
 	tmpDir := t.TempDir()
-	path := filepath.Join(tmpDir, "cached.ftsr")
+	path := filepath.Join(tmpDir, "cached.sear")
 
 	if err := idx.SaveToFile(path); err != nil {
 		t.Fatalf("SaveToFile failed: %v", err)
@@ -371,7 +371,7 @@ func TestCachedIndexLRUEviction(t *testing.T) {
 	idx.Add(1, "abcdefghijklmnopqrstuvwxyz") // 24 unique 3-grams
 
 	tmpDir := t.TempDir()
-	path := filepath.Join(tmpDir, "lru.ftsr")
+	path := filepath.Join(tmpDir, "lru.sear")
 
 	if err := idx.SaveToFile(path); err != nil {
 		t.Fatalf("SaveToFile failed: %v", err)
@@ -403,7 +403,7 @@ func TestCachedIndexSearchAny(t *testing.T) {
 	idx.Add(2, "banana")
 
 	tmpDir := t.TempDir()
-	path := filepath.Join(tmpDir, "any.ftsr")
+	path := filepath.Join(tmpDir, "any.sear")
 
 	if err := idx.SaveToFile(path); err != nil {
 		t.Fatalf("SaveToFile failed: %v", err)
@@ -426,7 +426,7 @@ func TestCachedIndexSearchThreshold(t *testing.T) {
 	idx.Add(2, "hello there")
 
 	tmpDir := t.TempDir()
-	path := filepath.Join(tmpDir, "threshold.ftsr")
+	path := filepath.Join(tmpDir, "threshold.sear")
 
 	if err := idx.SaveToFile(path); err != nil {
 		t.Fatalf("SaveToFile failed: %v", err)
@@ -448,7 +448,7 @@ func TestCachedIndexClearCache(t *testing.T) {
 	idx.Add(1, "hello world")
 
 	tmpDir := t.TempDir()
-	path := filepath.Join(tmpDir, "clear.ftsr")
+	path := filepath.Join(tmpDir, "clear.sear")
 
 	if err := idx.SaveToFile(path); err != nil {
 		t.Fatalf("SaveToFile failed: %v", err)
@@ -483,7 +483,7 @@ func TestCachedIndexPreload(t *testing.T) {
 	idx.Add(1, "hello world")
 
 	tmpDir := t.TempDir()
-	path := filepath.Join(tmpDir, "preload.ftsr")
+	path := filepath.Join(tmpDir, "preload.sear")
 
 	if err := idx.SaveToFile(path); err != nil {
 		t.Fatalf("SaveToFile failed: %v", err)
@@ -510,7 +510,7 @@ func BenchmarkCachedSearch(b *testing.B) {
 	}
 
 	tmpDir := b.TempDir()
-	path := filepath.Join(tmpDir, "bench.ftsr")
+	path := filepath.Join(tmpDir, "bench.sear")
 	idx.SaveToFile(path)
 
 	cached, _ := OpenCachedIndex(path, WithCacheSize(100))

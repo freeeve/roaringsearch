@@ -135,7 +135,7 @@ func TestHasNgram(t *testing.T) {
 	idx.Add(1, "hello world")
 
 	tmpDir := t.TempDir()
-	path := tmpDir + "/test.ftsr"
+	path := tmpDir + "/test.sear"
 	idx.SaveToFile(path)
 
 	cached, err := OpenCachedIndex(path)
@@ -157,7 +157,7 @@ func TestLoadFromFileWithOptions(t *testing.T) {
 	idx.Add(1, "hello world")
 
 	tmpDir := t.TempDir()
-	path := tmpDir + "/test.ftsr"
+	path := tmpDir + "/test.sear"
 	idx.SaveToFile(path)
 
 	// Test with custom normalizer

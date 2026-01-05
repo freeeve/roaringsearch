@@ -86,13 +86,13 @@ idx.NgramCount() int
 
 ```go
 // Save to disk
-idx.SaveToFile("index.ftsr")
+idx.SaveToFile("index.sear")
 
 // Load fully into memory
-idx, _ := rs.LoadFromFile("index.ftsr")
+idx, _ := rs.LoadFromFile("index.sear")
 
 // Open with LRU cache (for large indexes)
-cached, _ := rs.OpenCachedIndex("index.ftsr", rs.WithCacheSize(1000))
+cached, _ := rs.OpenCachedIndex("index.sear", rs.WithCacheSize(1000))
 cached.Search("query")
 cached.ClearCache()
 ```
