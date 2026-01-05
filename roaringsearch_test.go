@@ -520,3 +520,101 @@ func BenchmarkCachedSearch(b *testing.B) {
 		cached.Search("brown fox")
 	}
 }
+
+func TestMixedLanguageIndex(t *testing.T) {
+	// Test that ASCII and Unicode documents coexist correctly
+	idx := NewIndex(2)
+
+	idx.Add(1, "hello world")
+	idx.Add(2, "Hello 世界") // hello world in mixed
+	idx.Add(3, "世界和平")     // world peace in Chinese
+
+	// Search for "hello" should find both docs 1 and 2
+	results := idx.Search("hello")
+	sort.Slice(results, func(i, j int) bool { return results[i] < results[j] })
+	if len(results) != 2 {
+		t.Errorf("Search(hello) = %v, want [1, 2]", results)
+	}
+
+	// Search for "世界" should find docs 2 and 3
+	results = idx.Search("世界")
+	sort.Slice(results, func(i, j int) bool { return results[i] < results[j] })
+	if len(results) != 2 {
+		t.Errorf("Search(世界) = %v, want [2, 3]", results)
+	}
+}
+
+func TestSearchAnyCount(t *testing.T) {
+	idx := NewIndex(3)
+
+	idx.Add(1, "hello world")
+	idx.Add(2, "hello there")
+	idx.Add(3, "goodbye world")
+
+	count := idx.SearchAnyCount("hello")
+	if count != 2 {
+		t.Errorf("SearchAnyCount(hello) = %d, want 2", count)
+	}
+}
+
+func TestHasNgram(t *testing.T) {
+	idx := NewIndex(3)
+	idx.Add(1, "hello world")
+
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "test.sear")
+	idx.SaveToFile(path)
+
+	cached, err := OpenCachedIndex(path)
+	if err != nil {
+		t.Fatalf("failed to open cached index: %v", err)
+	}
+
+	if !cached.HasNgram("hel") {
+		t.Error("expected HasNgram(hel) to return true")
+	}
+
+	if cached.HasNgram("zzz") {
+		t.Error("expected HasNgram(zzz) to return false")
+	}
+}
+
+func TestLoadFromFileWithOptions(t *testing.T) {
+	idx := NewIndex(3)
+	idx.Add(1, "hello world")
+
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "test.sear")
+	idx.SaveToFile(path)
+
+	loaded, err := LoadFromFileWithOptions(path, WithNormalizer(NormalizeLowercase))
+	if err != nil {
+		t.Fatalf("LoadFromFileWithOptions failed: %v", err)
+	}
+
+	if loaded.NgramCount() != idx.NgramCount() {
+		t.Errorf("ngram count mismatch: got %d, want %d", loaded.NgramCount(), idx.NgramCount())
+	}
+}
+
+func TestGramSizeClamping(t *testing.T) {
+	idx := NewIndex(0)
+	if idx.GramSize() != 3 {
+		t.Errorf("gram size 0 should default to 3, got %d", idx.GramSize())
+	}
+
+	idx = NewIndex(-1)
+	if idx.GramSize() != 3 {
+		t.Errorf("gram size -1 should default to 3, got %d", idx.GramSize())
+	}
+
+	idx = NewIndex(10)
+	if idx.GramSize() != 8 {
+		t.Errorf("gram size 10 should clamp to 8, got %d", idx.GramSize())
+	}
+
+	idx = NewIndex(5)
+	if idx.GramSize() != 5 {
+		t.Errorf("gram size 5 should be 5, got %d", idx.GramSize())
+	}
+}
