@@ -63,26 +63,6 @@ func generateDocument(rng *rand.Rand, minWords, maxWords int) string {
 	return strings.Join(words, " ")
 }
 
-func generateUniqueDocument(rng *rand.Rand, docID int, minWords, maxWords int) string {
-	uniqueID := fmt.Sprintf("doc%08x", docID)
-	numWords := minWords + rng.Intn(maxWords-minWords+1)
-	words := make([]string, numWords+1)
-	words[0] = uniqueID
-
-	for i := 1; i <= numWords; i++ {
-		switch rng.Intn(10) {
-		case 0:
-			words[i] = techWords[rng.Intn(len(techWords))]
-		case 1:
-			words[i] = nameWords[rng.Intn(len(nameWords))]
-		default:
-			words[i] = commonWords[rng.Intn(len(commonWords))]
-		}
-	}
-
-	return strings.Join(words, " ")
-}
-
 var cached10MIndex *Index
 var cached10MIndexPath string
 
@@ -138,13 +118,6 @@ func getOrCreate10MIndexFile(b *testing.B) string {
 
 	cached10MIndexPath = path
 	return path
-}
-
-func printMemStats(b *testing.B, label string) {
-	var m runtime.MemStats
-	runtime.GC()
-	runtime.ReadMemStats(&m)
-	b.Logf("%s - Alloc: %.2f MB", label, float64(m.Alloc)/(1024*1024))
 }
 
 // ============================================================================

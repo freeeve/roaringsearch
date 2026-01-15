@@ -73,3 +73,50 @@ func TestLoadFromFileWithOptions(t *testing.T) {
 		t.Errorf("ngram count mismatch: got %d, want %d", loaded.NgramCount(), idx.NgramCount())
 	}
 }
+
+func TestSaveToFileError(t *testing.T) {
+	idx := NewIndex(3)
+	idx.Add(1, "hello")
+
+	// Try to save to an invalid path
+	err := idx.SaveToFile("/nonexistent/directory/test.sear")
+	if err == nil {
+		t.Error("SaveToFile should fail for invalid path")
+	}
+}
+
+func TestLoadFromFileError(t *testing.T) {
+	// Try to load from nonexistent file
+	_, err := LoadFromFile("/nonexistent/file.sear")
+	if err == nil {
+		t.Error("LoadFromFile should fail for nonexistent file")
+	}
+
+	// Try to load from invalid file
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "invalid.sear")
+	os.WriteFile(path, []byte("invalid data"), 0644)
+
+	_, err = LoadFromFile(path)
+	if err == nil {
+		t.Error("LoadFromFile should fail for invalid file format")
+	}
+}
+
+func TestOpenCachedIndexError(t *testing.T) {
+	// Try to open nonexistent file
+	_, err := OpenCachedIndex("/nonexistent/file.sear")
+	if err == nil {
+		t.Error("OpenCachedIndex should fail for nonexistent file")
+	}
+
+	// Try to open invalid file
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "invalid.sear")
+	os.WriteFile(path, []byte("invalid data"), 0644)
+
+	_, err = OpenCachedIndex(path)
+	if err == nil {
+		t.Error("OpenCachedIndex should fail for invalid file format")
+	}
+}

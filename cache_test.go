@@ -134,6 +134,39 @@ func TestCachedIndexSearchThreshold(t *testing.T) {
 	}
 }
 
+func TestCachedIndexMoveToFront(t *testing.T) {
+	idx := NewIndex(3)
+	idx.Add(1, "hello world")
+	idx.Add(2, "foo bar baz")
+	idx.Add(3, "test data here")
+
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "lru_move.sear")
+
+	if err := idx.SaveToFile(path); err != nil {
+		t.Fatalf("SaveToFile failed: %v", err)
+	}
+
+	cached, err := OpenCachedIndex(path, WithCacheSize(100))
+	if err != nil {
+		t.Fatalf("OpenCachedIndex failed: %v", err)
+	}
+
+	// Search for different terms to populate cache
+	cached.Search("hello")
+	cached.Search("foo")
+	cached.Search("test")
+
+	// Search for "hello" again - this should trigger moveToFront
+	cached.Search("hello")
+
+	// Search should still work correctly
+	results := cached.Search("hello")
+	if len(results) != 1 || results[0] != 1 {
+		t.Errorf("Search after moveToFront = %v, want [1]", results)
+	}
+}
+
 func TestCachedIndexClearCache(t *testing.T) {
 	idx := NewIndex(3)
 	idx.Add(1, "hello world")
@@ -193,6 +226,73 @@ func TestCachedIndexPreload(t *testing.T) {
 	}
 }
 
+func TestWithCachedNormalizer(t *testing.T) {
+	idx := NewIndex(3, WithNormalizer(NormalizeLowercase))
+	idx.Add(1, "Hello World")
+	idx.Add(2, "HELLO THERE")
+
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "normalizer.sear")
+
+	if err := idx.SaveToFile(path); err != nil {
+		t.Fatalf("SaveToFile failed: %v", err)
+	}
+
+	// Open with custom normalizer
+	cached, err := OpenCachedIndex(path, WithCachedNormalizer(NormalizeLowercase))
+	if err != nil {
+		t.Fatalf("OpenCachedIndex failed: %v", err)
+	}
+
+	// Search should work with normalizer
+	results := cached.Search("HELLO")
+	if len(results) != 2 {
+		t.Errorf("expected 2 results, got %d", len(results))
+	}
+}
+
+func TestPreloadKeys(t *testing.T) {
+	idx := NewIndex(3)
+	idx.Add(1, "hello world")
+	idx.Add(2, "hello there")
+
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "preloadkeys.sear")
+
+	if err := idx.SaveToFile(path); err != nil {
+		t.Fatalf("SaveToFile failed: %v", err)
+	}
+
+	cached, err := OpenCachedIndex(path, WithCacheSize(100))
+	if err != nil {
+		t.Fatalf("OpenCachedIndex failed: %v", err)
+	}
+
+	// Get some valid keys from the index
+	var keys []uint64
+	for key := range cached.ngramIndex {
+		keys = append(keys, key)
+		if len(keys) >= 3 {
+			break
+		}
+	}
+
+	// Preload keys
+	if err := cached.PreloadKeys(keys); err != nil {
+		t.Errorf("PreloadKeys failed: %v", err)
+	}
+
+	// Cache should now have entries
+	if cached.CacheSize() < len(keys) {
+		t.Errorf("cache size = %d, want >= %d", cached.CacheSize(), len(keys))
+	}
+
+	// Preload with invalid key should still work (keys not in index are ignored)
+	if err := cached.PreloadKeys([]uint64{99999999}); err != nil {
+		t.Errorf("PreloadKeys with invalid key failed: %v", err)
+	}
+}
+
 func TestHasNgram(t *testing.T) {
 	idx := NewIndex(3)
 	idx.Add(1, "hello world")
@@ -212,6 +312,146 @@ func TestHasNgram(t *testing.T) {
 
 	if cached.HasNgram("zzz") {
 		t.Error("expected HasNgram(zzz) to return false")
+	}
+}
+
+func TestCachedIndexSearchEdgeCases(t *testing.T) {
+	idx := NewIndex(3)
+	idx.Add(1, "hello world")
+	idx.Add(2, "hello there")
+
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "edge.sear")
+
+	if err := idx.SaveToFile(path); err != nil {
+		t.Fatalf("SaveToFile failed: %v", err)
+	}
+
+	cached, err := OpenCachedIndex(path)
+	if err != nil {
+		t.Fatalf("OpenCachedIndex failed: %v", err)
+	}
+
+	// Short query
+	results := cached.Search("he")
+	if results != nil {
+		t.Errorf("short query should return nil, got %v", results)
+	}
+
+	// Empty query
+	results = cached.Search("")
+	if results != nil {
+		t.Errorf("empty query should return nil, got %v", results)
+	}
+
+	// Query not in index
+	results = cached.Search("xyz")
+	if results != nil {
+		t.Errorf("missing query should return nil, got %v", results)
+	}
+
+	// SearchAny with short query
+	results = cached.SearchAny("he")
+	if results != nil {
+		t.Errorf("SearchAny short query should return nil, got %v", results)
+	}
+
+	// SearchAny with missing query
+	results = cached.SearchAny("xyz")
+	if results != nil {
+		t.Errorf("SearchAny missing query should return nil, got %v", results)
+	}
+
+	// SearchThreshold with short query
+	result := cached.SearchThreshold("he", 1)
+	if result.DocIDs != nil {
+		t.Errorf("SearchThreshold short query should return nil, got %v", result.DocIDs)
+	}
+
+	// HasNgram with short ngram
+	if cached.HasNgram("he") {
+		t.Error("HasNgram should return false for short ngram")
+	}
+}
+
+func TestCachedIndexEviction(t *testing.T) {
+	// Create index with many unique ngrams
+	idx := NewIndex(3)
+	idx.Add(1, "alpha beta gamma delta")
+	idx.Add(2, "epsilon zeta eta theta")
+	idx.Add(3, "iota kappa lambda mu")
+
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "evict.sear")
+
+	if err := idx.SaveToFile(path); err != nil {
+		t.Fatalf("SaveToFile failed: %v", err)
+	}
+
+	// Small cache to force eviction
+	cached, err := OpenCachedIndex(path, WithCacheSize(3))
+	if err != nil {
+		t.Fatalf("OpenCachedIndex failed: %v", err)
+	}
+
+	// Search multiple times to fill and evict cache
+	cached.Search("alpha")
+	cached.Search("epsilon")
+	cached.Search("iota")
+	cached.Search("beta")  // Should trigger eviction
+	cached.Search("gamma") // Should trigger eviction
+
+	// Verify searches still work
+	results := cached.Search("alpha")
+	if len(results) != 1 {
+		t.Errorf("Search after eviction failed: got %v", results)
+	}
+}
+
+func TestCachedIndexSingleEntryEviction(t *testing.T) {
+	idx := NewIndex(3)
+	idx.Add(1, "hello world")
+	idx.Add(2, "foo bar baz")
+
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "single.sear")
+	idx.SaveToFile(path)
+
+	// Cache size 1 - every new search evicts
+	cached, _ := OpenCachedIndex(path, WithCacheSize(1))
+
+	cached.Search("hello")
+	if cached.CacheSize() != 1 {
+		t.Errorf("cache size after first search = %d, want 1", cached.CacheSize())
+	}
+
+	cached.Search("foo")
+	if cached.CacheSize() != 1 {
+		t.Errorf("cache size after second search = %d, want 1", cached.CacheSize())
+	}
+
+	// Re-search first term (should reload from disk)
+	results := cached.Search("hello")
+	if len(results) != 1 {
+		t.Errorf("re-search after eviction failed: got %v", results)
+	}
+}
+
+func TestCachedIndexSearchAnyPartialMatch(t *testing.T) {
+	idx := NewIndex(3)
+	idx.Add(1, "hello world")
+	idx.Add(2, "goodbye world")
+
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "partial.sear")
+	idx.SaveToFile(path)
+
+	cached, _ := OpenCachedIndex(path)
+
+	// SearchAny with partial match - "hello xyz" has some ngrams that exist
+	results := cached.SearchAny("hello xyz")
+	if len(results) != 1 || results[0] != 1 {
+		t.Errorf("SearchAny partial match = %v, want [1]", results)
 	}
 }
 
