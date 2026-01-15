@@ -26,16 +26,14 @@ func NormalizeLowercaseAlphanumeric(s string) string {
 	return b.String()
 }
 
-// normalizeAndKeyASCII normalizes ASCII text and generates n-gram keys directly.
-// Returns keys slice and true if successful, nil and false if text contains non-ASCII.
-// Key encoding must match runeNgramKey: 32-bit per char for n<=2, 8-bit for n>2.
-func normalizeAndKeyASCII(s string, gramSize int, keys []uint64) ([]uint64, bool) {
-	// Normalize in place to a byte buffer
-	buf := make([]byte, 0, len(s))
+// normalizeASCIIToBuf normalizes ASCII text to a byte buffer.
+// Returns the buffer and true if successful, or the buffer and false if non-ASCII found.
+func normalizeASCIIToBuf(s string, buf []byte) ([]byte, bool) {
+	buf = buf[:0]
 	for i := 0; i < len(s); i++ {
 		c := s[i]
 		if c > 127 {
-			return nil, false // Non-ASCII, fall back
+			return buf, false
 		}
 		if c >= 'A' && c <= 'Z' {
 			buf = append(buf, c+32)
@@ -43,39 +41,53 @@ func normalizeAndKeyASCII(s string, gramSize int, keys []uint64) ([]uint64, bool
 			buf = append(buf, c)
 		}
 	}
+	return buf, true
+}
+
+// packBytesToKey packs bytes into a uint64 key.
+// Uses 32-bit packing for gramSize <= 2, 8-bit for gramSize > 2.
+func packBytesToKey(buf []byte, start, gramSize int) uint64 {
+	var key uint64
+	if gramSize <= 2 {
+		for j := 0; j < gramSize; j++ {
+			key = (key << 32) | uint64(buf[start+j])
+		}
+	} else {
+		for j := 0; j < gramSize; j++ {
+			key = (key << 8) | uint64(buf[start+j])
+		}
+	}
+	return key
+}
+
+// appendKeyDedup appends key to keys if not already present.
+func appendKeyDedup(keys []uint64, key uint64) []uint64 {
+	for _, k := range keys {
+		if k == key {
+			return keys
+		}
+	}
+	return append(keys, key)
+}
+
+// normalizeAndKeyASCII normalizes ASCII text and generates n-gram keys directly.
+// Returns keys slice and true if successful, nil and false if text contains non-ASCII.
+// Key encoding must match runeNgramKey: 32-bit per char for n<=2, 8-bit for n>2.
+func normalizeAndKeyASCII(s string, gramSize int, keys []uint64) ([]uint64, bool) {
+	buf := make([]byte, 0, len(s))
+	buf, ok := normalizeASCIIToBuf(s, buf)
+	if !ok {
+		return nil, false
+	}
 
 	if len(buf) < gramSize {
 		return keys[:0], true
 	}
 
-	// Generate keys directly from bytes
-	// Must match runeNgramKey encoding: 32-bit for n<=2, 8-bit for n>2
 	keys = keys[:0]
 	for i := 0; i <= len(buf)-gramSize; i++ {
-		var key uint64
-		if gramSize <= 2 {
-			// 32-bit packing to match packRunes
-			for j := 0; j < gramSize; j++ {
-				key = (key << 32) | uint64(buf[i+j])
-			}
-		} else {
-			// 8-bit packing for gramSize 3-8
-			for j := 0; j < gramSize; j++ {
-				key = (key << 8) | uint64(buf[i+j])
-			}
-		}
-
-		// Check for duplicate (linear scan)
-		found := false
-		for _, k := range keys {
-			if k == key {
-				found = true
-				break
-			}
-		}
-		if !found {
-			keys = append(keys, key)
-		}
+		key := packBytesToKey(buf, i, gramSize)
+		keys = appendKeyDedup(keys, key)
 	}
 
 	return keys, true
@@ -84,65 +96,19 @@ func normalizeAndKeyASCII(s string, gramSize int, keys []uint64) ([]uint64, bool
 // normalizeAndKeyASCIIPooled is like normalizeAndKeyASCII but uses a provided buffer.
 // Returns (keys, buf, ok) where buf is the potentially grown buffer for pool return.
 func normalizeAndKeyASCIIPooled(s string, gramSize int, keys []uint64, buf []byte) ([]uint64, []byte, bool) {
-	// Normalize in place to byte buffer
-	buf = buf[:0]
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if c > 127 {
-			return nil, buf, false // Non-ASCII, fall back
-		}
-		if c >= 'A' && c <= 'Z' {
-			buf = append(buf, c+32)
-		} else if (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') {
-			buf = append(buf, c)
-		}
+	buf, ok := normalizeASCIIToBuf(s, buf)
+	if !ok {
+		return nil, buf, false
 	}
 
 	if len(buf) < gramSize {
 		return keys[:0], buf, true
 	}
 
-	// Generate keys directly from bytes
 	keys = keys[:0]
-	n := len(buf) - gramSize
-
-	if gramSize <= 2 {
-		// 32-bit packing for gram sizes 1-2
-		for i := 0; i <= n; i++ {
-			var key uint64
-			for j := 0; j < gramSize; j++ {
-				key = (key << 32) | uint64(buf[i+j])
-			}
-			// Dedup with linear scan (fast for small N)
-			found := false
-			for _, k := range keys {
-				if k == key {
-					found = true
-					break
-				}
-			}
-			if !found {
-				keys = append(keys, key)
-			}
-		}
-	} else {
-		// 8-bit packing for gram sizes 3-8
-		for i := 0; i <= n; i++ {
-			var key uint64
-			for j := 0; j < gramSize; j++ {
-				key = (key << 8) | uint64(buf[i+j])
-			}
-			found := false
-			for _, k := range keys {
-				if k == key {
-					found = true
-					break
-				}
-			}
-			if !found {
-				keys = append(keys, key)
-			}
-		}
+	for i := 0; i <= len(buf)-gramSize; i++ {
+		key := packBytesToKey(buf, i, gramSize)
+		keys = appendKeyDedup(keys, key)
 	}
 
 	return keys, buf, true

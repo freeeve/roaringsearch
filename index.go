@@ -129,30 +129,103 @@ func (idx *Index) AddBatch(docs []Document) {
 	idx.AddBatchN(docs, 0)
 }
 
+// localIndex holds per-worker bitmap data during batch indexing.
+type localIndex struct {
+	bitmaps map[uint64]*roaring.Bitmap
+}
+
+// addKeyToBitmap adds a document ID to the bitmap for the given key.
+func (local *localIndex) addKeyToBitmap(key uint64, docID uint32) {
+	bm, exists := local.bitmaps[key]
+	if !exists {
+		bm = roaring.New()
+		local.bitmaps[key] = bm
+	}
+	bm.Add(docID)
+}
+
+// processDocASCII processes a document using the fast ASCII path.
+func (idx *Index) processDocASCII(doc Document, local *localIndex, keys []uint64, buf []byte) ([]uint64, []byte, bool) {
+	var ok bool
+	keys, buf, ok = normalizeAndKeyASCIIPooled(doc.Text, idx.gramSize, keys, buf)
+	if !ok {
+		return keys, buf, false
+	}
+	for _, key := range keys {
+		local.addKeyToBitmap(key, doc.ID)
+	}
+	return keys, buf, true
+}
+
+// processDocUnicode processes a document using rune-based Unicode handling.
+func (idx *Index) processDocUnicode(doc Document, local *localIndex, seen []uint64) []uint64 {
+	normalized := idx.normalizer(doc.Text)
+	runes := []rune(normalized)
+
+	if len(runes) < idx.gramSize {
+		return seen
+	}
+
+	seen = seen[:0]
+	for i := 0; i <= len(runes)-idx.gramSize; i++ {
+		key := runeNgramKey(runes[i : i+idx.gramSize])
+		if !containsKey(seen, key) {
+			seen = append(seen, key)
+			local.addKeyToBitmap(key, doc.ID)
+		}
+	}
+	return seen
+}
+
+// containsKey checks if key exists in the slice.
+func containsKey(keys []uint64, key uint64) bool {
+	for _, k := range keys {
+		if k == key {
+			return true
+		}
+	}
+	return false
+}
+
 // AddBatchN indexes multiple documents with a specified number of workers.
 // If workers <= 0, defaults to runtime.NumCPU().
 func (idx *Index) AddBatchN(docs []Document, workers int) {
 	if len(docs) == 0 {
 		return
 	}
+	workers = idx.clampWorkers(workers, len(docs))
+
+	localIndexes := idx.initLocalIndexes(workers, len(docs))
+
+	var wg sync.WaitGroup
+	chunkSize := (len(docs) + workers - 1) / workers
+
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go idx.processChunk(docs, w, chunkSize, &localIndexes[w], &wg)
+	}
+
+	wg.Wait()
+	idx.mergeLocalIndexes(localIndexes)
+}
+
+// clampWorkers adjusts worker count based on document count.
+func (idx *Index) clampWorkers(workers, docCount int) int {
 	if workers <= 0 {
 		workers = runtime.NumCPU()
 	}
-	if workers > len(docs) {
-		workers = len(docs)
+	if workers > docCount {
+		workers = docCount
 	}
-	// For small batches, use single worker to avoid goroutine overhead
-	if len(docs) < 100 && workers > 1 {
+	if docCount < 100 && workers > 1 {
 		workers = 1
 	}
+	return workers
+}
 
-	// Create per-worker local indexes
-	// Pre-size maps based on expected unique n-grams (estimate ~50 per doc, capped at 10k)
-	type localIndex struct {
-		bitmaps map[uint64]*roaring.Bitmap
-	}
-
-	docsPerWorker := (len(docs) + workers - 1) / workers
+// initLocalIndexes creates per-worker local indexes.
+func (idx *Index) initLocalIndexes(workers, docCount int) []localIndex {
+	docsPerWorker := (docCount + workers - 1) / workers
 	estimatedNgrams := docsPerWorker * 50
 	if estimatedNgrams > 10000 {
 		estimatedNgrams = 10000
@@ -162,88 +235,40 @@ func (idx *Index) AddBatchN(docs []Document, workers int) {
 	for i := range localIndexes {
 		localIndexes[i].bitmaps = make(map[uint64]*roaring.Bitmap, estimatedNgrams)
 	}
+	return localIndexes
+}
 
-	// Process documents in parallel
-	var wg sync.WaitGroup
-	chunkSize := (len(docs) + workers - 1) / workers
+// processChunk processes a chunk of documents for a worker.
+func (idx *Index) processChunk(docs []Document, workerID, chunkSize int, local *localIndex, wg *sync.WaitGroup) {
+	defer wg.Done()
 
-	for w := 0; w < workers; w++ {
-		wg.Add(1)
-		go func(workerID int) {
-			defer wg.Done()
-
-			start := workerID * chunkSize
-			end := start + chunkSize
-			if end > len(docs) {
-				end = len(docs)
-			}
-			if start >= len(docs) {
-				return
-			}
-
-			local := &localIndexes[workerID]
-			keys := make([]uint64, 0, 64)
-			buf := make([]byte, 0, 256) // Reused buffer for ASCII normalization
-			seen := make([]uint64, 0, 64)
-			useFastPath := idx.useASCIFastPath
-
-			for _, doc := range docs[start:end] {
-				// Try fast ASCII path (only with default normalizer)
-				if useFastPath {
-					var ok bool
-					keys, buf, ok = normalizeAndKeyASCIIPooled(doc.Text, idx.gramSize, keys, buf)
-					if ok {
-						for _, key := range keys {
-							bm, exists := local.bitmaps[key]
-							if !exists {
-								bm = roaring.New()
-								local.bitmaps[key] = bm
-							}
-							bm.Add(doc.ID)
-						}
-						continue
-					}
-				}
-
-				// Fallback: rune-based processing for Unicode or custom normalizer
-				normalized := idx.normalizer(doc.Text)
-				runes := []rune(normalized)
-
-				if len(runes) < idx.gramSize {
-					continue
-				}
-
-				seen = seen[:0]
-
-				for i := 0; i <= len(runes)-idx.gramSize; i++ {
-					key := runeNgramKey(runes[i : i+idx.gramSize])
-
-					found := false
-					for _, k := range seen {
-						if k == key {
-							found = true
-							break
-						}
-					}
-					if found {
-						continue
-					}
-					seen = append(seen, key)
-
-					bm, exists := local.bitmaps[key]
-					if !exists {
-						bm = roaring.New()
-						local.bitmaps[key] = bm
-					}
-					bm.Add(doc.ID)
-				}
-			}
-		}(w)
+	start := workerID * chunkSize
+	end := start + chunkSize
+	if end > len(docs) {
+		end = len(docs)
+	}
+	if start >= len(docs) {
+		return
 	}
 
-	wg.Wait()
+	keys := make([]uint64, 0, 64)
+	buf := make([]byte, 0, 256)
+	seen := make([]uint64, 0, 64)
 
-	// Merge local indexes into main index
+	for _, doc := range docs[start:end] {
+		if idx.useASCIFastPath {
+			var ok bool
+			keys, buf, ok = idx.processDocASCII(doc, local, keys, buf)
+			if ok {
+				continue
+			}
+		}
+		seen = idx.processDocUnicode(doc, local, seen)
+	}
+}
+
+// mergeLocalIndexes merges all local indexes into the main index.
+func (idx *Index) mergeLocalIndexes(localIndexes []localIndex) {
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
 
