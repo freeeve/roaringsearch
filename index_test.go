@@ -70,9 +70,9 @@ func TestSearchAnyCount(t *testing.T) {
 func TestSearchThreshold(t *testing.T) {
 	idx := NewIndex(3)
 
-	idx.Add(1, "hello world")    // ngrams: hel, ell, llo, owo, wor, orl, rld
-	idx.Add(2, "hello there")    // ngrams: hel, ell, llo, oth, the, her, ere
-	idx.Add(3, "goodbye world")  // ngrams: goo, ood, odb, dby, bye, ewo, wor, orl, rld
+	idx.Add(1, "hello world")   // ngrams: hel, ell, llo, owo, wor, orl, rld
+	idx.Add(2, "hello there")   // ngrams: hel, ell, llo, oth, the, her, ere
+	idx.Add(3, "goodbye world") // ngrams: goo, ood, odb, dby, bye, ewo, wor, orl, rld
 
 	// Search "hello" (hel, ell, llo) with threshold 2
 	result := idx.SearchThreshold("hello", 2)

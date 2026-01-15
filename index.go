@@ -657,4 +657,3 @@ func (idx *Index) SearchThreshold(query string, threshold int) SearchResult {
 		Scores: scores,
 	}
 }
-

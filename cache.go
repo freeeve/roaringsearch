@@ -461,4 +461,3 @@ func (idx *CachedIndex) PreloadKeys(keys []uint64) error {
 	}
 	return nil
 }
-

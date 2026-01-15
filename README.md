@@ -1,5 +1,10 @@
 # roaringsearch
 
+[![CI](https://github.com/freeeve/roaringsearch/actions/workflows/ci.yml/badge.svg)](https://github.com/freeeve/roaringsearch/actions/workflows/ci.yml)
+[![Coverage Status](https://coveralls.io/repos/github/freeeve/roaringsearch/badge.svg?branch=main)](https://coveralls.io/github/freeeve/roaringsearch?branch=main)
+[![Go Report Card](https://goreportcard.com/badge/github.com/freeeve/roaringsearch)](https://goreportcard.com/report/github.com/freeeve/roaringsearch)
+[![Go Reference](https://pkg.go.dev/badge/github.com/freeeve/roaringsearch.svg)](https://pkg.go.dev/github.com/freeeve/roaringsearch)
+
 A high-performance n-gram text search library using roaring bitmaps for Go.
 
 ## Features
