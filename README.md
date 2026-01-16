@@ -100,6 +100,10 @@ idx, _ := rs.LoadFromFile("index.sear")
 cached, _ := rs.OpenCachedIndex("index.sear", rs.WithCacheSize(1000))
 cached.Search("query")
 cached.ClearCache()
+
+// Open with memory budget (recommended for predictable memory usage)
+cached, _ := rs.OpenCachedIndex("index.sear", rs.WithMemoryBudget(100*1024*1024)) // 100MB
+cached.MemoryUsage() // returns current bytes used
 ```
 
 ### Normalizers

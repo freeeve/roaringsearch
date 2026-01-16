@@ -22,10 +22,12 @@ type CachedIndex struct {
 	filePath   string
 
 	// LRU cache
-	cache    map[uint64]*lruEntry
-	lruHead  *lruEntry // most recently used
-	lruTail  *lruEntry // least recently used
-	maxCache int
+	cache         map[uint64]*lruEntry
+	lruHead       *lruEntry // most recently used
+	lruTail       *lruEntry // least recently used
+	maxCache      int       // max number of bitmaps (0 = unlimited when using memory budget)
+	maxMemory     int64     // max memory in bytes (0 = use maxCache instead)
+	currentMemory uint64    // current memory usage in bytes
 
 	// Index of n-gram positions in file for lazy loading
 	ngramIndex map[uint64]ngramLocation
@@ -34,6 +36,7 @@ type CachedIndex struct {
 type lruEntry struct {
 	key    uint64
 	bitmap *roaring.Bitmap
+	size   uint64 // memory size of bitmap
 	prev   *lruEntry
 	next   *lruEntry
 }
@@ -52,6 +55,18 @@ func WithCacheSize(n int) CachedIndexOption {
 	return func(idx *CachedIndex) {
 		if n > 0 {
 			idx.maxCache = n
+		}
+	}
+}
+
+// WithMemoryBudget sets the maximum memory (in bytes) for cached bitmaps.
+// When set, maxCache count is ignored and eviction is based purely on memory.
+// Example: WithMemoryBudget(100 * 1024 * 1024) for 100MB limit.
+func WithMemoryBudget(bytes int64) CachedIndexOption {
+	return func(idx *CachedIndex) {
+		if bytes > 0 {
+			idx.maxMemory = bytes
+			idx.maxCache = 0 // disable count-based limit
 		}
 	}
 }
@@ -226,17 +241,27 @@ func (idx *CachedIndex) loadBitmap(loc ngramLocation) (*roaring.Bitmap, error) {
 }
 
 func (idx *CachedIndex) addToCache(key uint64, bm *roaring.Bitmap) {
-	// Evict if at capacity
-	for len(idx.cache) >= idx.maxCache && idx.lruTail != nil {
-		idx.evictLRU()
+	bmSize := bm.GetSizeInBytes()
+
+	// Evict based on memory budget or count limit
+	if idx.maxMemory > 0 {
+		for idx.currentMemory+bmSize > uint64(idx.maxMemory) && idx.lruTail != nil {
+			idx.evictLRU()
+		}
+	} else {
+		for len(idx.cache) >= idx.maxCache && idx.lruTail != nil {
+			idx.evictLRU()
+		}
 	}
 
 	entry := &lruEntry{
 		key:    key,
 		bitmap: bm,
+		size:   bmSize,
 	}
 
 	idx.cache[key] = entry
+	idx.currentMemory += bmSize
 	idx.addToFront(entry)
 }
 
@@ -281,6 +306,7 @@ func (idx *CachedIndex) evictLRU() {
 
 	entry := idx.lruTail
 	delete(idx.cache, entry.key)
+	idx.currentMemory -= entry.size
 
 	if entry.prev != nil {
 		entry.prev.next = nil
@@ -300,6 +326,14 @@ func (idx *CachedIndex) ClearCache() {
 	idx.cache = make(map[uint64]*lruEntry)
 	idx.lruHead = nil
 	idx.lruTail = nil
+	idx.currentMemory = 0
+}
+
+// MemoryUsage returns the current memory usage of cached bitmaps in bytes.
+func (idx *CachedIndex) MemoryUsage() uint64 {
+	idx.mu.RLock()
+	defer idx.mu.RUnlock()
+	return idx.currentMemory
 }
 
 // generateKeys generates unique n-gram keys from a query.

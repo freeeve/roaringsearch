@@ -437,6 +437,50 @@ func TestCachedIndexSingleEntryEviction(t *testing.T) {
 	}
 }
 
+func TestWithMemoryBudget(t *testing.T) {
+	idx := NewIndex(3)
+	// Add docs with varying content to create different sized bitmaps
+	for i := 1; i <= 100; i++ {
+		idx.Add(uint32(i), "hello world test data for memory budget")
+	}
+
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "memory.sear")
+	idx.SaveToFile(path)
+
+	// Open with 1KB memory budget
+	cached, err := OpenCachedIndex(path, WithMemoryBudget(1024))
+	if err != nil {
+		t.Fatalf("OpenCachedIndex failed: %v", err)
+	}
+
+	// Initial memory should be 0
+	if cached.MemoryUsage() != 0 {
+		t.Errorf("initial memory usage = %d, want 0", cached.MemoryUsage())
+	}
+
+	// Search to populate cache
+	cached.Search("hello")
+	cached.Search("world")
+	cached.Search("test")
+
+	// Memory should be tracked
+	if cached.MemoryUsage() == 0 {
+		t.Error("memory usage should be > 0 after searches")
+	}
+
+	// Memory should stay under budget
+	if cached.MemoryUsage() > 1024 {
+		t.Errorf("memory usage %d exceeds budget 1024", cached.MemoryUsage())
+	}
+
+	// Clear should reset memory
+	cached.ClearCache()
+	if cached.MemoryUsage() != 0 {
+		t.Errorf("memory usage after clear = %d, want 0", cached.MemoryUsage())
+	}
+}
+
 func TestCachedIndexSearchAnyPartialMatch(t *testing.T) {
 	idx := NewIndex(3)
 	idx.Add(1, "hello world")
