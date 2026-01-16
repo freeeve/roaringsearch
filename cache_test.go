@@ -1,6 +1,7 @@
 package roaringsearch
 
 import (
+	"fmt"
 	"path/filepath"
 	"reflect"
 	"sort"
@@ -479,6 +480,177 @@ func TestWithMemoryBudget(t *testing.T) {
 	if cached.MemoryUsage() != 0 {
 		t.Errorf("memory usage after clear = %d, want 0", cached.MemoryUsage())
 	}
+}
+
+func TestMemoryBudgetRespected(t *testing.T) {
+	// Create index with many unique ngrams to generate many bitmaps
+	idx := NewIndex(3)
+	words := []string{
+		"alpha", "bravo", "charlie", "delta", "echo", "foxtrot",
+		"golf", "hotel", "india", "juliet", "kilo", "lima",
+		"mike", "november", "oscar", "papa", "quebec", "romeo",
+		"sierra", "tango", "uniform", "victor", "whiskey", "xray",
+		"yankee", "zulu", "one", "two", "three", "four", "five",
+	}
+
+	// Add many documents with different word combinations
+	docID := uint32(1)
+	for i := 0; i < len(words); i++ {
+		for j := 0; j < len(words); j++ {
+			if i != j {
+				idx.Add(docID, words[i]+" "+words[j])
+				docID++
+			}
+		}
+	}
+
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "budget_test.sear")
+	if err := idx.SaveToFile(path); err != nil {
+		t.Fatalf("SaveToFile failed: %v", err)
+	}
+
+	// Set a small memory budget (10KB)
+	memoryBudget := int64(10 * 1024)
+	cached, err := OpenCachedIndex(path, WithMemoryBudget(memoryBudget))
+	if err != nil {
+		t.Fatalf("OpenCachedIndex failed: %v", err)
+	}
+
+	// Track max memory seen
+	var maxMemory uint64
+
+	// Perform many searches to stress the cache
+	for _, word := range words {
+		cached.Search(word)
+
+		usage := cached.MemoryUsage()
+		if usage > maxMemory {
+			maxMemory = usage
+		}
+
+		// Verify budget is never exceeded
+		if usage > uint64(memoryBudget) {
+			t.Errorf("memory budget exceeded: usage=%d, budget=%d", usage, memoryBudget)
+		}
+	}
+
+	// Do another round to ensure eviction is working
+	for _, word := range words {
+		cached.SearchAny(word + " test")
+
+		usage := cached.MemoryUsage()
+		if usage > uint64(memoryBudget) {
+			t.Errorf("memory budget exceeded on second pass: usage=%d, budget=%d", usage, memoryBudget)
+		}
+	}
+
+	t.Logf("Memory budget: %d bytes, max observed: %d bytes, final: %d bytes",
+		memoryBudget, maxMemory, cached.MemoryUsage())
+}
+
+func TestMemoryBudgetWithLargeBitmaps(t *testing.T) {
+	// Create index with large sparse bitmaps (more realistic)
+	idx := NewIndex(3)
+
+	// Create 50 unique words, each appearing in random subsets of 10K docs
+	words := make([]string, 50)
+	for i := range words {
+		words[i] = fmt.Sprintf("word%03d", i)
+	}
+
+	// Add 10K docs with random word combinations
+	for docID := uint32(1); docID <= 10000; docID++ {
+		// Each doc gets 3-5 random words
+		numWords := 3 + int(docID%3)
+		var text string
+		for j := 0; j < numWords; j++ {
+			wordIdx := (int(docID) * (j + 1)) % len(words)
+			text += words[wordIdx] + " "
+		}
+		idx.Add(docID, text)
+	}
+
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "large_budget_test.sear")
+	if err := idx.SaveToFile(path); err != nil {
+		t.Fatalf("SaveToFile failed: %v", err)
+	}
+
+	// 50KB budget - should force frequent eviction
+	memoryBudget := int64(50 * 1024)
+	cached, err := OpenCachedIndex(path, WithMemoryBudget(memoryBudget))
+	if err != nil {
+		t.Fatalf("OpenCachedIndex failed: %v", err)
+	}
+
+	t.Logf("Index has %d ngrams", cached.NgramCount())
+
+	// Hammer with 200 queries
+	for i := 0; i < 200; i++ {
+		word := words[i%len(words)]
+		cached.Search(word)
+
+		usage := cached.MemoryUsage()
+		if usage > uint64(memoryBudget) {
+			t.Errorf("query %d: memory budget exceeded: usage=%d, budget=%d", i, usage, memoryBudget)
+		}
+	}
+
+	t.Logf("After 200 queries: cache has %d entries, memory: %d/%d bytes",
+		cached.CacheSize(), cached.MemoryUsage(), memoryBudget)
+
+	// Verify eviction happened (cache shouldn't have all ngrams)
+	if cached.CacheSize() >= cached.NgramCount() {
+		t.Errorf("eviction not working: cache has %d entries but index has %d ngrams",
+			cached.CacheSize(), cached.NgramCount())
+	}
+}
+
+func TestMemoryBudgetLargeBitmaps(t *testing.T) {
+	// Simulate a real index with 100K docs and common ngrams
+	idx := NewIndex(3)
+
+	// Add 100K docs - common words appear in many docs creating large bitmaps
+	commonWords := []string{"the", "and", "for", "with", "this", "that", "from", "have", "been", "were"}
+	for docID := uint32(1); docID <= 100000; docID++ {
+		// Each doc has 2 common words + unique content
+		text := commonWords[int(docID)%len(commonWords)] + " " +
+			commonWords[(int(docID)+3)%len(commonWords)] + " " +
+			fmt.Sprintf("unique%d content%d", docID, docID*7)
+		idx.Add(docID, text)
+	}
+
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "large_bitmaps.sear")
+	if err := idx.SaveToFile(path); err != nil {
+		t.Fatalf("SaveToFile failed: %v", err)
+	}
+
+	// 1MB budget
+	memoryBudget := int64(1024 * 1024)
+	cached, err := OpenCachedIndex(path, WithMemoryBudget(memoryBudget))
+	if err != nil {
+		t.Fatalf("OpenCachedIndex failed: %v", err)
+	}
+
+	t.Logf("Index has %d ngrams", cached.NgramCount())
+
+	// Query common words (large bitmaps)
+	for i := 0; i < 100; i++ {
+		word := commonWords[i%len(commonWords)]
+		_ = cached.Search(word) // discard result
+
+		usage := cached.MemoryUsage()
+		if usage > uint64(memoryBudget) {
+			t.Errorf("query %d (%s): memory %d exceeds budget %d",
+				i, word, usage, memoryBudget)
+		}
+	}
+
+	t.Logf("After 100 queries: cache=%d entries, memory=%d/%d bytes (%.1f%%)",
+		cached.CacheSize(), cached.MemoryUsage(), memoryBudget,
+		float64(cached.MemoryUsage())/float64(memoryBudget)*100)
 }
 
 func TestCachedIndexSearchAnyPartialMatch(t *testing.T) {
