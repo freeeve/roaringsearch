@@ -7,12 +7,15 @@
 
 A high-performance n-gram text search library using roaring bitmaps for Go.
 
+Designed to run on memory-constrained environments like AWS t4g.micro (1GB RAM) while still supporting large indexes via disk-backed caching with configurable memory budgets.
+
 ## Features
 
 - N-gram based text indexing (configurable gram size 1-8)
 - Full Unicode support (Japanese, Chinese, Arabic, etc.)
 - Multiple search modes: AND, OR, threshold-based
-- Disk-backed index with LRU cache for large datasets
+- Disk-backed index with memory-budgeted LRU cache
+- Configurable memory limits for predictable resource usage
 - Thread-safe for concurrent reads
 
 ## Installation
@@ -89,14 +92,16 @@ idx.NgramCount() int
 
 ### Disk-backed Index
 
+For large indexes that don't fit in memory, use the disk-backed `CachedIndex` with a memory budget:
+
 ```go
 // Save to disk
 idx.SaveToFile("index.sear")
 
-// Load fully into memory
+// Load fully into memory (only for small indexes)
 idx, _ := rs.LoadFromFile("index.sear")
 
-// Open with LRU cache (for large indexes)
+// Open with LRU cache limited by bitmap count
 cached, _ := rs.OpenCachedIndex("index.sear", rs.WithCacheSize(1000))
 cached.Search("query")
 cached.ClearCache()
@@ -105,6 +110,27 @@ cached.ClearCache()
 cached, _ := rs.OpenCachedIndex("index.sear", rs.WithMemoryBudget(100*1024*1024)) // 100MB
 cached.MemoryUsage() // returns current bytes used
 ```
+
+### Memory Management
+
+For memory-constrained environments (e.g., t4g.micro with 1GB RAM), combine `WithMemoryBudget` with Go's `GOMEMLIMIT`:
+
+```bash
+# Set Go runtime soft memory limit to 800MB, leaving room for OS
+export GOMEMLIMIT=800MiB
+```
+
+```go
+// Use ~500MB for index cache, leaving room for app overhead
+cached, _ := rs.OpenCachedIndex("large.sear", rs.WithMemoryBudget(500*1024*1024))
+```
+
+The memory budget controls only the bitmap cache. Actual process memory will be higher due to:
+- Go runtime overhead
+- Query processing buffers
+- Your application's memory usage
+
+A conservative rule: set `WithMemoryBudget` to ~50-60% of `GOMEMLIMIT`.
 
 ### Normalizers
 
