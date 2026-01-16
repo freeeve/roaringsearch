@@ -653,6 +653,130 @@ func TestMemoryBudgetLargeBitmaps(t *testing.T) {
 		float64(cached.MemoryUsage())/float64(memoryBudget)*100)
 }
 
+func TestMemoryBudgetManyUniqueQueries(t *testing.T) {
+	// This test searches for MANY unique terms to force constant cache eviction
+	idx := NewIndex(3)
+
+	// Create 1000 unique words
+	words := make([]string, 1000)
+	for i := range words {
+		words[i] = fmt.Sprintf("word%04d", i)
+	}
+
+	// Add 50K docs with random word combinations
+	for docID := uint32(1); docID <= 50000; docID++ {
+		// Each doc gets 5 words
+		text := ""
+		for j := 0; j < 5; j++ {
+			wordIdx := (int(docID)*7 + j*13) % len(words)
+			text += words[wordIdx] + " "
+		}
+		idx.Add(docID, text)
+	}
+
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "many_queries.sear")
+	if err := idx.SaveToFile(path); err != nil {
+		t.Fatalf("SaveToFile failed: %v", err)
+	}
+
+	// Small budget to force eviction: 100KB
+	memoryBudget := int64(100 * 1024)
+	cached, err := OpenCachedIndex(path, WithMemoryBudget(memoryBudget))
+	if err != nil {
+		t.Fatalf("OpenCachedIndex failed: %v", err)
+	}
+
+	totalNgrams := cached.NgramCount()
+	t.Logf("Index has %d ngrams, budget %d bytes", totalNgrams, memoryBudget)
+
+	var maxUsage uint64
+	var evictionCount int
+	prevCacheSize := 0
+
+	// Search for ALL unique words - forces loading many different ngrams
+	for i, word := range words {
+		_ = cached.Search(word)
+
+		usage := cached.MemoryUsage()
+		if usage > maxUsage {
+			maxUsage = usage
+		}
+
+		if usage > uint64(memoryBudget) {
+			t.Errorf("query %d (%s): memory %d exceeds budget %d",
+				i, word, usage, memoryBudget)
+		}
+
+		// Track evictions
+		if cached.CacheSize() < prevCacheSize {
+			evictionCount++
+		}
+		prevCacheSize = cached.CacheSize()
+	}
+
+	t.Logf("After %d unique queries:", len(words))
+	t.Logf("  Max memory: %d bytes (%.1f%% of budget)", maxUsage, float64(maxUsage)/float64(memoryBudget)*100)
+	t.Logf("  Final cache: %d entries", cached.CacheSize())
+	t.Logf("  Evictions detected: %d", evictionCount)
+
+	// Verify eviction is happening
+	if evictionCount == 0 {
+		t.Error("expected evictions to occur with small budget and many queries")
+	}
+}
+
+func TestMemoryBudgetOversizedBitmap(t *testing.T) {
+	// Test that a bitmap larger than the budget doesn't break eviction
+	idx := NewIndex(3)
+
+	// Create one very common word that appears in ALL docs (huge bitmap)
+	// and many rare words
+	for docID := uint32(1); docID <= 50000; docID++ {
+		text := "common " + fmt.Sprintf("rare%05d unique%05d", docID, docID*3)
+		idx.Add(docID, text)
+	}
+
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "oversized.sear")
+	if err := idx.SaveToFile(path); err != nil {
+		t.Fatalf("SaveToFile failed: %v", err)
+	}
+
+	// Very small budget - likely smaller than the "common" bitmap
+	memoryBudget := int64(1024) // 1KB
+	cached, err := OpenCachedIndex(path, WithMemoryBudget(memoryBudget))
+	if err != nil {
+		t.Fatalf("OpenCachedIndex failed: %v", err)
+	}
+
+	t.Logf("Index has %d ngrams, budget %d bytes", cached.NgramCount(), memoryBudget)
+
+	// Search for "common" - this bitmap is huge (50K docs)
+	results := cached.Search("common")
+	t.Logf("Search 'common' returned %d results", len(results))
+
+	// Memory should NOT exceed budget even with oversized bitmap
+	usage := cached.MemoryUsage()
+	if usage > uint64(memoryBudget) {
+		t.Errorf("memory %d exceeds budget %d after oversized bitmap", usage, memoryBudget)
+	}
+
+	// Search for rare terms - these should fit in cache
+	for i := 1; i <= 10; i++ {
+		word := fmt.Sprintf("rare%05d", i)
+		_ = cached.Search(word)
+
+		usage = cached.MemoryUsage()
+		if usage > uint64(memoryBudget) {
+			t.Errorf("memory %d exceeds budget %d after query %d", usage, memoryBudget, i)
+		}
+	}
+
+	t.Logf("Final: cache=%d entries, memory=%d/%d bytes",
+		cached.CacheSize(), cached.MemoryUsage(), memoryBudget)
+}
+
 func TestCachedIndexSearchAnyPartialMatch(t *testing.T) {
 	idx := NewIndex(3)
 	idx.Add(1, "hello world")

@@ -245,6 +245,10 @@ func (idx *CachedIndex) addToCache(key uint64, bm *roaring.Bitmap) {
 
 	// Evict based on memory budget or count limit
 	if idx.maxMemory > 0 {
+		// Skip caching if single bitmap exceeds entire budget
+		if bmSize > uint64(idx.maxMemory) {
+			return
+		}
 		for idx.currentMemory+bmSize > uint64(idx.maxMemory) && idx.lruTail != nil {
 			idx.evictLRU()
 		}
