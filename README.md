@@ -132,6 +132,105 @@ The memory budget controls only the bitmap cache. Actual process memory will be 
 
 A conservative rule: set `WithMemoryBudget` to ~50-60% of `GOMEMLIMIT`.
 
+### BitmapFilter & SortColumn (Filtering & Sorting)
+
+For filtering and sorting search results, use `BitmapFilter` for category filtering and `SortColumn` for value-based sorting. These are separate concerns that compose well together.
+
+#### BitmapFilter
+
+Provides O(1) category lookups using bitmap indexes. Supports multiple filter fields (e.g., "media_type", "language").
+
+```go
+filter := rs.NewBitmapFilter()
+
+// Index documents with categories
+filter.Set(1, "media_type", "book")
+filter.Set(1, "language", "english")
+filter.Set(2, "media_type", "movie")
+filter.Set(2, "language", "spanish")
+
+// Get bitmap for a category
+books := filter.Get("media_type", "book")       // bitmap of all books
+
+// OR within a field
+booksOrMovies := filter.GetAny("media_type", []string{"book", "movie"})
+
+// AND across fields
+english := filter.Get("language", "english")
+englishBooks := roaring.And(books, english)     // combine with roaring.And
+
+// Get category stats
+counts := filter.Counts("media_type")           // map[string]uint64{"book": 1000, "movie": 500}
+
+// Persistence
+filter.SaveToFile("filter.idx")
+loaded, _ := rs.LoadBitmapFilter("filter.idx")
+```
+
+#### SortColumn
+
+Provides cache-efficient columnar sorting. Generic - supports any ordered type (uint16, uint64, float64, string, etc.).
+
+```go
+// Create a typed sort column
+ratings := rs.NewSortColumn[uint16]()
+
+// Index document values
+ratings.Set(1, 85)
+ratings.Set(2, 92)
+ratings.Set(3, 78)
+
+// Sort doc IDs by value (descending, limit 100)
+results := ratings.SortDesc([]uint32{1, 2, 3}, 100)
+// returns: []SortedResult[uint16]{{DocID: 2, Value: 92}, {DocID: 1, Value: 85}, ...}
+
+// Sort from a bitmap
+results := ratings.SortBitmapDesc(someBitmap, 100)
+
+// Multiple sort columns with different types
+timestamps := rs.NewSortColumn[uint64]()
+prices := rs.NewSortColumn[float64]()
+
+// Persistence
+ratings.SaveToFile("ratings.col")
+loaded, _ := rs.LoadSortColumn[uint16]("ratings.col")
+```
+
+#### Combined Filter + Sort Example
+
+```go
+// Build indexes
+filter := rs.NewBitmapFilter()
+ratings := rs.NewSortColumn[uint16]()
+
+for _, doc := range documents {
+    filter.Set(doc.ID, "category", doc.Category)
+    ratings.Set(doc.ID, doc.Rating)
+}
+
+// Search + filter + sort
+searchResults := idx.Search("query")                    // n-gram search
+searchBitmap := roaring.BitmapOf(searchResults...)
+categoryBitmap := filter.Get("category", "electronics")
+filtered := roaring.And(searchBitmap, categoryBitmap)   // intersect
+topResults := ratings.SortBitmapDesc(filtered, 100)     // sort + limit
+```
+
+**Memory Usage (100M documents, 12 categories, uint16 values):**
+- Category bitmaps: 143 MB
+- Sort values: 214 MB
+- **Total: 357 MB**
+
+**Performance (100M docs indexed, returning top 1000):**
+
+| Search Results to Filter/Sort | Filter + Sort | Sort Only |
+|-------------------------------|---------------|-----------|
+| 10K candidates | 157µs | 309µs |
+| 100K candidates | 1.5ms | 593µs |
+| 1M candidates | 14ms | 1.8ms |
+
+Uses heap-based partial sort for O(n log k) performance when limit << input size.
+
 ### Normalizers
 
 ```go
