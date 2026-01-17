@@ -523,6 +523,60 @@ func TestResultHeapPush(t *testing.T) {
 	}
 }
 
+func TestBitmapFilterSetBatch(t *testing.T) {
+	filter := NewBitmapFilter()
+
+	entries := []FilterEntry{
+		{DocID: 1, Field: "media_type", Category: "book"},
+		{DocID: 2, Field: "media_type", Category: "book"},
+		{DocID: 3, Field: "media_type", Category: "movie"},
+		{DocID: 1, Field: "language", Category: "english"},
+		{DocID: 2, Field: "language", Category: "spanish"},
+	}
+
+	filter.SetBatch(entries)
+
+	books := filter.Get("media_type", "book")
+	if books.GetCardinality() != 2 {
+		t.Errorf("books = %d, want 2", books.GetCardinality())
+	}
+
+	english := filter.Get("language", "english")
+	if english.GetCardinality() != 1 {
+		t.Errorf("english = %d, want 1", english.GetCardinality())
+	}
+
+	// Empty batch should not panic
+	filter.SetBatch(nil)
+	filter.SetBatch([]FilterEntry{})
+}
+
+func TestSortColumnSetBatch(t *testing.T) {
+	col := NewSortColumn[uint16]()
+
+	entries := []ColumnEntry[uint16]{
+		{DocID: 1, Value: 100},
+		{DocID: 5, Value: 500},
+		{DocID: 3, Value: 300},
+	}
+
+	col.SetBatch(entries)
+
+	if v := col.Get(1); v != 100 {
+		t.Errorf("Get(1) = %d, want 100", v)
+	}
+	if v := col.Get(5); v != 500 {
+		t.Errorf("Get(5) = %d, want 500", v)
+	}
+	if v := col.Get(3); v != 300 {
+		t.Errorf("Get(3) = %d, want 300", v)
+	}
+
+	// Empty batch should not panic
+	col.SetBatch(nil)
+	col.SetBatch([]ColumnEntry[uint16]{})
+}
+
 func TestBitmapFilterAllCounts(t *testing.T) {
 	filter := NewBitmapFilter()
 
@@ -551,6 +605,64 @@ func TestBitmapFilterAllCounts(t *testing.T) {
 	if allCounts["language"]["spanish"] != 1 {
 		t.Errorf("language.spanish = %d, want 1", allCounts["language"]["spanish"])
 	}
+}
+
+func BenchmarkSetBatch(b *testing.B) {
+	const numDocs = 1_000_000
+	categories := []string{
+		"electronics", "books", "clothing", "home", "sports",
+		"toys", "automotive", "garden", "health", "beauty",
+		"grocery", "pets",
+	}
+
+	b.Run("BitmapFilter/Set", func(b *testing.B) {
+		for n := 0; n < b.N; n++ {
+			filter := NewBitmapFilter()
+			for i := uint32(1); i <= numDocs; i++ {
+				filter.Set(i, "category", categories[int(i)%len(categories)])
+			}
+		}
+	})
+
+	b.Run("BitmapFilter/SetBatch", func(b *testing.B) {
+		entries := make([]FilterEntry, numDocs)
+		for i := uint32(1); i <= numDocs; i++ {
+			entries[i-1] = FilterEntry{
+				DocID:    i,
+				Field:    "category",
+				Category: categories[int(i)%len(categories)],
+			}
+		}
+		b.ResetTimer()
+		for n := 0; n < b.N; n++ {
+			filter := NewBitmapFilter()
+			filter.SetBatch(entries)
+		}
+	})
+
+	b.Run("SortColumn/Set", func(b *testing.B) {
+		for n := 0; n < b.N; n++ {
+			col := NewSortColumn[uint16]()
+			for i := uint32(1); i <= numDocs; i++ {
+				col.Set(i, uint16(i*7%65536))
+			}
+		}
+	})
+
+	b.Run("SortColumn/SetBatch", func(b *testing.B) {
+		entries := make([]ColumnEntry[uint16], numDocs)
+		for i := uint32(1); i <= numDocs; i++ {
+			entries[i-1] = ColumnEntry[uint16]{
+				DocID: i,
+				Value: uint16(i * 7 % 65536),
+			}
+		}
+		b.ResetTimer()
+		for n := 0; n < b.N; n++ {
+			col := NewSortColumn[uint16]()
+			col.SetBatch(entries)
+		}
+	})
 }
 
 func BenchmarkFilterAndSort100M(b *testing.B) {

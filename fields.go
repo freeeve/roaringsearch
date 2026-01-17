@@ -42,7 +42,10 @@ func NewBitmapFilter() *BitmapFilter {
 func (c *BitmapFilter) Set(docID uint32, field, category string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.setLocked(docID, field, category)
+}
 
+func (c *BitmapFilter) setLocked(docID uint32, field, category string) {
 	fieldMap, ok := c.Fields[field]
 	if !ok {
 		fieldMap = make(map[string]*roaring.Bitmap)
@@ -55,6 +58,27 @@ func (c *BitmapFilter) Set(docID uint32, field, category string) {
 		fieldMap[category] = bm
 	}
 	bm.Add(docID)
+}
+
+// FilterEntry represents a single filter assignment for batch operations.
+type FilterEntry struct {
+	DocID    uint32
+	Field    string
+	Category string
+}
+
+// SetBatch assigns multiple documents to categories efficiently.
+// Acquires lock once for the entire batch.
+func (c *BitmapFilter) SetBatch(entries []FilterEntry) {
+	if len(entries) == 0 {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	for i := range entries {
+		c.setLocked(entries[i].DocID, entries[i].Field, entries[i].Category)
+	}
 }
 
 // Remove removes a document from all categories across all fields.
@@ -261,7 +285,10 @@ func NewSortColumn[T cmp.Ordered]() *SortColumn[T] {
 func (col *SortColumn[T]) Set(docID uint32, value T) {
 	col.mu.Lock()
 	defer col.mu.Unlock()
+	col.setLocked(docID, value)
+}
 
+func (col *SortColumn[T]) setLocked(docID uint32, value T) {
 	// Grow array if needed
 	if docID >= uint32(len(col.Values)) {
 		newSize := docID + 1
@@ -280,6 +307,46 @@ func (col *SortColumn[T]) Set(docID uint32, value T) {
 
 	if docID > col.maxDocID {
 		col.maxDocID = docID
+	}
+}
+
+// ColumnEntry represents a single value assignment for batch operations.
+type ColumnEntry[T cmp.Ordered] struct {
+	DocID uint32
+	Value T
+}
+
+// SetBatch sets multiple values efficiently.
+// Pre-allocates to max docID and acquires lock once.
+func (col *SortColumn[T]) SetBatch(entries []ColumnEntry[T]) {
+	if len(entries) == 0 {
+		return
+	}
+
+	// Find max docID to pre-allocate
+	var maxID uint32
+	for i := range entries {
+		if entries[i].DocID > maxID {
+			maxID = entries[i].DocID
+		}
+	}
+
+	col.mu.Lock()
+	defer col.mu.Unlock()
+
+	// Pre-allocate if needed
+	if maxID >= uint32(len(col.Values)) {
+		newValues := make([]T, maxID+1)
+		copy(newValues, col.Values)
+		col.Values = newValues
+	}
+
+	// Set all values
+	for i := range entries {
+		col.Values[entries[i].DocID] = entries[i].Value
+		if entries[i].DocID > col.maxDocID {
+			col.maxDocID = entries[i].DocID
+		}
 	}
 }
 
