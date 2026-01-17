@@ -1,6 +1,7 @@
 package roaringsearch
 
 import (
+	"container/heap"
 	"fmt"
 	"path/filepath"
 	"testing"
@@ -496,6 +497,29 @@ func TestSortColumnHeapSortPartialFill(t *testing.T) {
 	// Top 4 should be docs 20, 19, 18, 17 with values 200, 190, 180, 170
 	if results[0].DocID != 20 || results[0].Value != 200 {
 		t.Errorf("results[0] = %+v, want {DocID:20, Value:200}", results[0])
+	}
+}
+
+func TestResultHeapPush(t *testing.T) {
+	// Test the Push method directly since heapSort doesn't use heap.Push
+	h := &resultHeap[uint16]{
+		items: make([]SortedResult[uint16], 0),
+		asc:   false,
+	}
+
+	// Use heap.Push to add items
+	heap.Push(h, SortedResult[uint16]{DocID: 1, Value: 100})
+	heap.Push(h, SortedResult[uint16]{DocID: 2, Value: 200})
+	heap.Push(h, SortedResult[uint16]{DocID: 3, Value: 50})
+
+	if h.Len() != 3 {
+		t.Errorf("heap len = %d, want 3", h.Len())
+	}
+
+	// Pop should return smallest first (min-heap for descending sort)
+	result := heap.Pop(h).(SortedResult[uint16])
+	if result.Value != 50 {
+		t.Errorf("first pop value = %d, want 50", result.Value)
 	}
 }
 
