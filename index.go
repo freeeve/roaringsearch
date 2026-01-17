@@ -268,17 +268,48 @@ func (idx *Index) processChunk(docs []Document, workerID, chunkSize int, local *
 }
 
 // mergeLocalIndexes merges all local indexes into the main index.
+// Uses parallel pairwise reduction for better performance with many workers.
 func (idx *Index) mergeLocalIndexes(localIndexes []localIndex) {
+	if len(localIndexes) == 0 {
+		return
+	}
+
+	// Parallel pairwise reduction: 16 -> 8 -> 4 -> 2 -> 1
+	for len(localIndexes) > 1 {
+		half := (len(localIndexes) + 1) / 2
+		var wg sync.WaitGroup
+
+		for i := 0; i < len(localIndexes)/2; i++ {
+			wg.Add(1)
+			go func(dst, src int) {
+				defer wg.Done()
+				mergeTwoLocals(&localIndexes[dst], &localIndexes[src])
+			}(i, half+i)
+		}
+		wg.Wait()
+		localIndexes = localIndexes[:half]
+	}
+
+	// Final merge into main index
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
 
-	for _, local := range localIndexes {
-		for key, localBm := range local.bitmaps {
-			if bm, ok := idx.bitmaps[key]; ok {
-				bm.Or(localBm)
-			} else {
-				idx.bitmaps[key] = localBm
-			}
+	for key, localBm := range localIndexes[0].bitmaps {
+		if bm, ok := idx.bitmaps[key]; ok {
+			bm.Or(localBm)
+		} else {
+			idx.bitmaps[key] = localBm
+		}
+	}
+}
+
+// mergeTwoLocals merges src into dst.
+func mergeTwoLocals(dst, src *localIndex) {
+	for key, srcBm := range src.bitmaps {
+		if dstBm, ok := dst.bitmaps[key]; ok {
+			dstBm.Or(srcBm)
+		} else {
+			dst.bitmaps[key] = srcBm
 		}
 	}
 }
