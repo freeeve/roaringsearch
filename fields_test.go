@@ -384,6 +384,151 @@ func TestMultiFieldFilterAndSort(t *testing.T) {
 	}
 }
 
+func TestSortColumnGet(t *testing.T) {
+	col := NewSortColumn[uint16]()
+
+	col.Set(1, 100)
+	col.Set(2, 200)
+	col.Set(5, 500)
+
+	// Get existing values
+	if v := col.Get(1); v != 100 {
+		t.Errorf("Get(1) = %d, want 100", v)
+	}
+	if v := col.Get(2); v != 200 {
+		t.Errorf("Get(2) = %d, want 200", v)
+	}
+	if v := col.Get(5); v != 500 {
+		t.Errorf("Get(5) = %d, want 500", v)
+	}
+
+	// Get non-existent (returns zero value)
+	if v := col.Get(999); v != 0 {
+		t.Errorf("Get(999) = %d, want 0", v)
+	}
+}
+
+func TestSortColumnSortDesc(t *testing.T) {
+	col := NewSortColumn[uint16]()
+
+	col.Set(1, 100)
+	col.Set(2, 50)
+	col.Set(3, 200)
+	col.Set(4, 150)
+
+	results := col.SortDesc([]uint32{1, 2, 3, 4}, 2)
+
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+	if results[0].DocID != 3 || results[0].Value != 200 {
+		t.Errorf("results[0] = %+v, want {DocID:3, Value:200}", results[0])
+	}
+	if results[1].DocID != 4 || results[1].Value != 150 {
+		t.Errorf("results[1] = %+v, want {DocID:4, Value:150}", results[1])
+	}
+}
+
+func TestSortColumnHeapSort(t *testing.T) {
+	col := NewSortColumn[uint16]()
+
+	// Create enough docs to trigger heap sort (limit < len/4)
+	// Need at least 100 docs with limit < 25
+	for i := uint32(1); i <= 100; i++ {
+		col.Set(i, uint16(i*7%1000))
+	}
+
+	docIDs := make([]uint32, 100)
+	for i := range docIDs {
+		docIDs[i] = uint32(i + 1)
+	}
+
+	// Limit 10 with 100 docs triggers heap sort (10 < 100/4 = 25)
+	results := col.SortDesc(docIDs, 10)
+
+	if len(results) != 10 {
+		t.Fatalf("expected 10 results, got %d", len(results))
+	}
+
+	// Verify results are sorted descending
+	for i := 1; i < len(results); i++ {
+		if results[i].Value > results[i-1].Value {
+			t.Errorf("results not sorted: [%d].Value=%d > [%d].Value=%d",
+				i, results[i].Value, i-1, results[i-1].Value)
+		}
+	}
+
+	// Test ascending heap sort
+	resultsAsc := col.Sort(docIDs, true, 10)
+	if len(resultsAsc) != 10 {
+		t.Fatalf("expected 10 asc results, got %d", len(resultsAsc))
+	}
+
+	// Verify results are sorted ascending
+	for i := 1; i < len(resultsAsc); i++ {
+		if resultsAsc[i].Value < resultsAsc[i-1].Value {
+			t.Errorf("asc results not sorted: [%d].Value=%d < [%d].Value=%d",
+				i, resultsAsc[i].Value, i-1, resultsAsc[i-1].Value)
+		}
+	}
+}
+
+func TestSortColumnHeapSortPartialFill(t *testing.T) {
+	col := NewSortColumn[uint16]()
+
+	// Only 5 docs but request limit of 10 with heap path
+	// Need to ensure heap path: create 20 docs, limit 4 (4 < 20/4 = 5)
+	for i := uint32(1); i <= 20; i++ {
+		col.Set(i, uint16(i*10))
+	}
+
+	docIDs := make([]uint32, 20)
+	for i := range docIDs {
+		docIDs[i] = uint32(i + 1)
+	}
+
+	results := col.SortDesc(docIDs, 4)
+
+	if len(results) != 4 {
+		t.Fatalf("expected 4 results, got %d", len(results))
+	}
+
+	// Top 4 should be docs 20, 19, 18, 17 with values 200, 190, 180, 170
+	if results[0].DocID != 20 || results[0].Value != 200 {
+		t.Errorf("results[0] = %+v, want {DocID:20, Value:200}", results[0])
+	}
+}
+
+func TestBitmapFilterAllCounts(t *testing.T) {
+	filter := NewBitmapFilter()
+
+	filter.Set(1, "media_type", "book")
+	filter.Set(2, "media_type", "book")
+	filter.Set(3, "media_type", "movie")
+	filter.Set(1, "language", "english")
+	filter.Set(2, "language", "spanish")
+	filter.Set(3, "language", "english")
+
+	allCounts := filter.AllCounts()
+
+	if len(allCounts) != 2 {
+		t.Fatalf("expected 2 fields, got %d", len(allCounts))
+	}
+
+	if allCounts["media_type"]["book"] != 2 {
+		t.Errorf("media_type.book = %d, want 2", allCounts["media_type"]["book"])
+	}
+	if allCounts["media_type"]["movie"] != 1 {
+		t.Errorf("media_type.movie = %d, want 1", allCounts["media_type"]["movie"])
+	}
+	if allCounts["language"]["english"] != 2 {
+		t.Errorf("language.english = %d, want 2", allCounts["language"]["english"])
+	}
+	if allCounts["language"]["spanish"] != 1 {
+		t.Errorf("language.spanish = %d, want 1", allCounts["language"]["spanish"])
+	}
+}
+
 func BenchmarkFilterAndSort100M(b *testing.B) {
 	filter := NewBitmapFilter()
 	col := NewSortColumn[uint16]()
