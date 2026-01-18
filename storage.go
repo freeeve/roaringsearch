@@ -171,20 +171,39 @@ func (idx *Index) ReadFrom(r io.Reader) (int64, error) {
 	return read, nil
 }
 
-// SaveToFile saves the index to a file.
+// SaveToFile saves the index to a file atomically.
+// Writes to a temp file first, then renames to prevent corruption on crash.
 func (idx *Index) SaveToFile(path string) error {
-	f, err := os.Create(path)
+	tmpPath := path + ".tmp"
+	f, err := os.Create(tmpPath)
 	if err != nil {
-		return fmt.Errorf("create file: %w", err)
+		return fmt.Errorf("create temp file: %w", err)
 	}
-	defer f.Close()
 
 	_, err = idx.WriteTo(f)
 	if err != nil {
+		f.Close()
+		os.Remove(tmpPath)
 		return err
 	}
 
-	return f.Sync()
+	if err := f.Sync(); err != nil {
+		f.Close()
+		os.Remove(tmpPath)
+		return fmt.Errorf("sync temp file: %w", err)
+	}
+
+	if err := f.Close(); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("close temp file: %w", err)
+	}
+
+	if err := os.Rename(tmpPath, path); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("rename temp file: %w", err)
+	}
+
+	return nil
 }
 
 // LoadFromFile loads an index from a file.

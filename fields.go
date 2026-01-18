@@ -294,14 +294,38 @@ type bitmapFilterData struct {
 	Fields map[string]map[string][]byte `msgpack:"fields"`
 }
 
-// SaveToFile saves the bitmap filter to a file.
+// SaveToFile saves the bitmap filter to a file atomically.
+// Writes to a temp file first, then renames to prevent corruption on crash.
 func (c *BitmapFilter) SaveToFile(path string) error {
-	file, err := os.Create(path)
+	tmpPath := path + ".tmp"
+	file, err := os.Create(tmpPath)
 	if err != nil {
 		return err
 	}
-	defer file.Close()
-	return c.Encode(file)
+
+	if err := c.Encode(file); err != nil {
+		file.Close()
+		os.Remove(tmpPath)
+		return err
+	}
+
+	if err := file.Sync(); err != nil {
+		file.Close()
+		os.Remove(tmpPath)
+		return err
+	}
+
+	if err := file.Close(); err != nil {
+		os.Remove(tmpPath)
+		return err
+	}
+
+	if err := os.Rename(tmpPath, path); err != nil {
+		os.Remove(tmpPath)
+		return err
+	}
+
+	return nil
 }
 
 // Encode writes the bitmap filter to a writer.
@@ -653,14 +677,38 @@ type sortColumnData[T cmp.Ordered] struct {
 	MaxDocID uint32 `msgpack:"max_doc_id"`
 }
 
-// SaveToFile saves the sort column to a file.
+// SaveToFile saves the sort column to a file atomically.
+// Writes to a temp file first, then renames to prevent corruption on crash.
 func (col *SortColumn[T]) SaveToFile(path string) error {
-	file, err := os.Create(path)
+	tmpPath := path + ".tmp"
+	file, err := os.Create(tmpPath)
 	if err != nil {
 		return err
 	}
-	defer file.Close()
-	return col.Encode(file)
+
+	if err := col.Encode(file); err != nil {
+		file.Close()
+		os.Remove(tmpPath)
+		return err
+	}
+
+	if err := file.Sync(); err != nil {
+		file.Close()
+		os.Remove(tmpPath)
+		return err
+	}
+
+	if err := file.Close(); err != nil {
+		os.Remove(tmpPath)
+		return err
+	}
+
+	if err := os.Rename(tmpPath, path); err != nil {
+		os.Remove(tmpPath)
+		return err
+	}
+
+	return nil
 }
 
 // Encode writes the sort column to a writer.
