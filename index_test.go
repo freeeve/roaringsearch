@@ -488,78 +488,40 @@ func TestGramSizeClamping(t *testing.T) {
 	}
 }
 
-func TestAddBatchN(t *testing.T) {
-	// Test empty batch
+func TestBatchEmpty(t *testing.T) {
 	idx := NewIndex(3)
-	idx.AddBatchN(nil, 4)
+	batch := idx.Batch()
+	batch.Flush() // empty flush
 	if idx.NgramCount() != 0 {
 		t.Error("empty batch should not add ngrams")
 	}
-
-	// Test single doc batch
-	idx = NewIndex(3)
-	idx.AddBatchN([]Document{{ID: 1, Text: "hello world"}}, 1)
-	if idx.NgramCount() == 0 {
-		t.Error("single doc batch should add ngrams")
-	}
-
-	// Test with explicit worker count
-	idx = NewIndex(3)
-	docs := []Document{
-		{ID: 1, Text: "hello world"},
-		{ID: 2, Text: "foo bar baz"},
-		{ID: 3, Text: "test data here"},
-	}
-	idx.AddBatchN(docs, 2)
-	results := idx.Search("hello")
-	if len(results) != 1 {
-		t.Errorf("AddBatchN search failed: got %v", results)
-	}
-
-	// Test with workers > docs (should clamp)
-	idx = NewIndex(3)
-	idx.AddBatchN(docs, 100)
-	if idx.NgramCount() == 0 {
-		t.Error("AddBatchN with many workers should still work")
-	}
-
-	// Test with workers = 0 (should default to NumCPU)
-	idx = NewIndex(3)
-	idx.AddBatchN(docs, 0)
-	if idx.NgramCount() == 0 {
-		t.Error("AddBatchN with 0 workers should default to NumCPU")
-	}
 }
 
-func TestAddBatchNBigrams(t *testing.T) {
-	// Test AddBatchN with bigrams (gramSize <= 2) to cover that code path
+func TestBatchBigrams(t *testing.T) {
 	idx := NewIndex(2)
-	docs := []Document{
-		{ID: 1, Text: "hello world"},
-		{ID: 2, Text: "hi there"},
-		{ID: 3, Text: "hey you"},
-	}
-	idx.AddBatchN(docs, 2)
+	batch := idx.Batch()
+	batch.Add(1, "hello world")
+	batch.Add(2, "hi there")
+	batch.Add(3, "hey you")
+	batch.Flush()
 
 	results := idx.Search("he")
 	if len(results) != 3 {
-		t.Errorf("bigram AddBatchN search failed: got %v, want 3 results", results)
+		t.Errorf("bigram batch search failed: got %v, want 3 results", results)
 	}
 }
 
-func TestAddBatchNUnicode(t *testing.T) {
-	// Test AddBatchN with Unicode to cover fallback path
-	idx := NewIndex(2) // Use bigrams for short CJK text
-	docs := []Document{
-		{ID: 1, Text: "東京都"},
-		{ID: 2, Text: "京都府"},
-		{ID: 3, Text: "大阪府"},
-	}
-	idx.AddBatchN(docs, 2)
+func TestBatchUnicode(t *testing.T) {
+	idx := NewIndex(2)
+	batch := idx.Batch()
+	batch.Add(1, "東京都")
+	batch.Add(2, "京都府")
+	batch.Add(3, "大阪府")
+	batch.Flush()
 
 	results := idx.Search("京都")
 	if len(results) != 2 {
-		t.Errorf("Unicode AddBatchN search failed: got %v", results)
+		t.Errorf("Unicode batch search failed: got %v", results)
 	}
 }
 
@@ -598,4 +560,72 @@ func BenchmarkSearchThreshold(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		idx.SearchThreshold("brown fox", 2)
 	}
+}
+
+func TestIndexBatch(t *testing.T) {
+	idx := NewIndex(3)
+
+	batch := idx.Batch()
+	batch.Add(1, "hello world")
+	batch.Add(2, "hello there")
+	batch.Add(3, "goodbye world")
+	batch.Flush()
+
+	// Verify search works
+	results := idx.Search("hello")
+	sort.Slice(results, func(i, j int) bool { return results[i] < results[j] })
+	expected := []uint32{1, 2}
+	if !reflect.DeepEqual(results, expected) {
+		t.Errorf("Search(hello) = %v, want %v", results, expected)
+	}
+
+	results = idx.Search("world")
+	sort.Slice(results, func(i, j int) bool { return results[i] < results[j] })
+	expected = []uint32{1, 3}
+	if !reflect.DeepEqual(results, expected) {
+		t.Errorf("Search(world) = %v, want %v", results, expected)
+	}
+
+	// Test batch reuse
+	batch.Add(4, "hello again")
+	batch.Flush()
+
+	results = idx.Search("hello")
+	if len(results) != 3 {
+		t.Errorf("Search(hello) after second flush = %d results, want 3", len(results))
+	}
+
+	// Empty flush should not panic
+	batch.Flush()
+}
+
+func BenchmarkIndexBatch(b *testing.B) {
+	const numDocs = 100_000
+	texts := []string{
+		"The quick brown fox jumps over the lazy dog",
+		"Pack my box with five dozen liquor jugs",
+		"How vexingly quick daft zebras jump",
+		"The five boxing wizards jump quickly",
+		"Sphinx of black quartz judge my vow",
+	}
+
+	b.Run("Add", func(b *testing.B) {
+		for n := 0; n < b.N; n++ {
+			idx := NewIndex(3)
+			for i := uint32(1); i <= numDocs; i++ {
+				idx.Add(i, texts[int(i)%len(texts)])
+			}
+		}
+	})
+
+	b.Run("Batch", func(b *testing.B) {
+		for n := 0; n < b.N; n++ {
+			idx := NewIndex(3)
+			batch := idx.BatchSize(numDocs)
+			for i := uint32(1); i <= numDocs; i++ {
+				batch.Add(i, texts[int(i)%len(texts)])
+			}
+			batch.Flush()
+		}
+	})
 }

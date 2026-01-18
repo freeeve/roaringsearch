@@ -122,11 +122,9 @@ func (idx *Index) Add(docID uint32, text string) {
 	}
 }
 
-// AddBatch indexes multiple documents efficiently using parallel processing.
-// This is significantly faster than calling Add repeatedly for bulk inserts.
-// Uses runtime.NumCPU() workers by default.
-func (idx *Index) AddBatch(docs []Document) {
-	idx.AddBatchN(docs, 0)
+// addBatch indexes multiple documents efficiently using parallel processing.
+func (idx *Index) addBatch(docs []document) {
+	idx.addBatchN(docs, 0)
 }
 
 // localIndex holds per-worker bitmap data during batch indexing.
@@ -145,21 +143,21 @@ func (local *localIndex) addKeyToBitmap(key uint64, docID uint32) {
 }
 
 // processDocASCII processes a document using the fast ASCII path.
-func (idx *Index) processDocASCII(doc Document, local *localIndex, keys []uint64, buf []byte) ([]uint64, []byte, bool) {
+func (idx *Index) processDocASCII(doc document, local *localIndex, keys []uint64, buf []byte) ([]uint64, []byte, bool) {
 	var ok bool
-	keys, buf, ok = normalizeAndKeyASCIIPooled(doc.Text, idx.gramSize, keys, buf)
+	keys, buf, ok = normalizeAndKeyASCIIPooled(doc.text, idx.gramSize, keys, buf)
 	if !ok {
 		return keys, buf, false
 	}
 	for _, key := range keys {
-		local.addKeyToBitmap(key, doc.ID)
+		local.addKeyToBitmap(key, doc.id)
 	}
 	return keys, buf, true
 }
 
 // processDocUnicode processes a document using rune-based Unicode handling.
-func (idx *Index) processDocUnicode(doc Document, local *localIndex, seen []uint64) []uint64 {
-	normalized := idx.normalizer(doc.Text)
+func (idx *Index) processDocUnicode(doc document, local *localIndex, seen []uint64) []uint64 {
+	normalized := idx.normalizer(doc.text)
 	runes := []rune(normalized)
 
 	if len(runes) < idx.gramSize {
@@ -171,7 +169,7 @@ func (idx *Index) processDocUnicode(doc Document, local *localIndex, seen []uint
 		key := runeNgramKey(runes[i : i+idx.gramSize])
 		if !containsKey(seen, key) {
 			seen = append(seen, key)
-			local.addKeyToBitmap(key, doc.ID)
+			local.addKeyToBitmap(key, doc.id)
 		}
 	}
 	return seen
@@ -187,9 +185,8 @@ func containsKey(keys []uint64, key uint64) bool {
 	return false
 }
 
-// AddBatchN indexes multiple documents with a specified number of workers.
-// If workers <= 0, defaults to runtime.NumCPU().
-func (idx *Index) AddBatchN(docs []Document, workers int) {
+// addBatchN indexes multiple documents with a specified number of workers.
+func (idx *Index) addBatchN(docs []document, workers int) {
 	if len(docs) == 0 {
 		return
 	}
@@ -239,7 +236,7 @@ func (idx *Index) initLocalIndexes(workers, docCount int) []localIndex {
 }
 
 // processChunk processes a chunk of documents for a worker.
-func (idx *Index) processChunk(docs []Document, workerID, chunkSize int, local *localIndex, wg *sync.WaitGroup) {
+func (idx *Index) processChunk(docs []document, workerID, chunkSize int, local *localIndex, wg *sync.WaitGroup) {
 	defer wg.Done()
 
 	start := workerID * chunkSize
@@ -314,10 +311,47 @@ func mergeTwoLocals(dst, src *localIndex) {
 	}
 }
 
-// Document represents a document to be indexed.
-type Document struct {
-	ID   uint32
-	Text string
+// document represents a document to be indexed (internal use).
+type document struct {
+	id   uint32
+	text string
+}
+
+// IndexBatch accumulates documents for efficient batch insertion.
+type IndexBatch struct {
+	idx  *Index
+	docs []document
+}
+
+// Batch creates a new batch builder for this index.
+// Use BatchSize for better performance when you know the approximate count.
+func (idx *Index) Batch() *IndexBatch {
+	return idx.BatchSize(1024)
+}
+
+// BatchSize creates a batch builder with pre-allocated capacity.
+func (idx *Index) BatchSize(size int) *IndexBatch {
+	return &IndexBatch{
+		idx:  idx,
+		docs: make([]document, 0, size),
+	}
+}
+
+// Add adds a document to the batch.
+func (b *IndexBatch) Add(docID uint32, text string) {
+	b.docs = append(b.docs, document{id: docID, text: text})
+}
+
+// Flush commits all accumulated documents to the index using parallel processing.
+func (b *IndexBatch) Flush() {
+	if len(b.docs) == 0 {
+		return
+	}
+
+	b.idx.addBatch(b.docs)
+
+	// Clear for reuse
+	b.docs = b.docs[:0]
 }
 
 // Remove removes a document from the index.

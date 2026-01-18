@@ -12,14 +12,11 @@ func buildIndex(numDocs int, seed int64) *Index {
 	idx := NewIndex(3)
 	rng := rand.New(rand.NewSource(seed))
 
-	docs := make([]Document, numDocs)
+	batch := idx.BatchSize(numDocs)
 	for i := 0; i < numDocs; i++ {
-		docs[i] = Document{
-			ID:   uint32(i),
-			Text: generateDocument(rng, 5, 20),
-		}
+		batch.Add(uint32(i), generateDocument(rng, 5, 20))
 	}
-	idx.AddBatch(docs)
+	batch.Flush()
 
 	return idx
 }

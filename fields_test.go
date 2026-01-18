@@ -523,58 +523,80 @@ func TestResultHeapPush(t *testing.T) {
 	}
 }
 
-func TestBitmapFilterSetBatch(t *testing.T) {
+func TestBitmapFilterBatch(t *testing.T) {
 	filter := NewBitmapFilter()
 
-	entries := []FilterEntry{
-		{DocID: 1, Field: "media_type", Category: "book"},
-		{DocID: 2, Field: "media_type", Category: "book"},
-		{DocID: 3, Field: "media_type", Category: "movie"},
-		{DocID: 1, Field: "language", Category: "english"},
-		{DocID: 2, Field: "language", Category: "spanish"},
-	}
-
-	filter.SetBatch(entries)
+	batch := filter.Batch("media_type")
+	batch.Add(1, "book")
+	batch.Add(2, "book")
+	batch.Add(3, "movie")
+	batch.Add(4, "book")
+	batch.Add(5, "movie")
+	batch.Flush()
 
 	books := filter.Get("media_type", "book")
-	if books.GetCardinality() != 2 {
-		t.Errorf("books = %d, want 2", books.GetCardinality())
+	if books.GetCardinality() != 3 {
+		t.Errorf("books = %d, want 3", books.GetCardinality())
 	}
 
-	english := filter.Get("language", "english")
-	if english.GetCardinality() != 1 {
-		t.Errorf("english = %d, want 1", english.GetCardinality())
+	movies := filter.Get("media_type", "movie")
+	if movies.GetCardinality() != 2 {
+		t.Errorf("movies = %d, want 2", movies.GetCardinality())
 	}
 
-	// Empty batch should not panic
-	filter.SetBatch(nil)
-	filter.SetBatch([]FilterEntry{})
+	// Test batch reuse
+	batch.Add(6, "music")
+	batch.Flush()
+
+	music := filter.Get("media_type", "music")
+	if music.GetCardinality() != 1 {
+		t.Errorf("music = %d, want 1", music.GetCardinality())
+	}
+
+	// Empty flush should not panic
+	batch.Flush()
 }
 
-func TestSortColumnSetBatch(t *testing.T) {
+func TestSortColumnBatch(t *testing.T) {
 	col := NewSortColumn[uint16]()
 
-	entries := []ColumnEntry[uint16]{
-		{DocID: 1, Value: 100},
-		{DocID: 5, Value: 500},
-		{DocID: 3, Value: 300},
-	}
+	batch := col.Batch()
+	batch.Add(1, 100)
+	batch.Add(2, 50)
+	batch.Add(3, 200)
+	batch.Add(4, 150)
+	batch.Flush()
 
-	col.SetBatch(entries)
-
+	// Verify values
 	if v := col.Get(1); v != 100 {
 		t.Errorf("Get(1) = %d, want 100", v)
 	}
-	if v := col.Get(5); v != 500 {
-		t.Errorf("Get(5) = %d, want 500", v)
+	if v := col.Get(2); v != 50 {
+		t.Errorf("Get(2) = %d, want 50", v)
 	}
-	if v := col.Get(3); v != 300 {
-		t.Errorf("Get(3) = %d, want 300", v)
+	if v := col.Get(3); v != 200 {
+		t.Errorf("Get(3) = %d, want 200", v)
+	}
+	if v := col.Get(4); v != 150 {
+		t.Errorf("Get(4) = %d, want 150", v)
 	}
 
-	// Empty batch should not panic
-	col.SetBatch(nil)
-	col.SetBatch([]ColumnEntry[uint16]{})
+	// Test sorting works correctly
+	results := col.SortDesc([]uint32{1, 2, 3, 4}, 0)
+	if results[0].DocID != 3 || results[0].Value != 200 {
+		t.Errorf("results[0] = %+v, want {DocID:3, Value:200}", results[0])
+	}
+
+	// Test batch reuse
+	batch.Add(5, 300)
+	batch.Flush()
+
+	if v := col.Get(5); v != 300 {
+		t.Errorf("Get(5) = %d, want 300", v)
+	}
+
+	// Empty flush should not panic
+	batch.Flush()
 }
 
 func TestBitmapFilterAllCounts(t *testing.T) {
@@ -607,7 +629,7 @@ func TestBitmapFilterAllCounts(t *testing.T) {
 	}
 }
 
-func BenchmarkSetBatch(b *testing.B) {
+func BenchmarkBatch(b *testing.B) {
 	const numDocs = 1_000_000
 	categories := []string{
 		"electronics", "books", "clothing", "home", "sports",
@@ -624,19 +646,20 @@ func BenchmarkSetBatch(b *testing.B) {
 		}
 	})
 
-	b.Run("BitmapFilter/SetBatch", func(b *testing.B) {
-		entries := make([]FilterEntry, numDocs)
+	b.Run("BitmapFilter/Batch", func(b *testing.B) {
+		// Pre-compute category strings
+		cats := make([]string, numDocs)
 		for i := uint32(1); i <= numDocs; i++ {
-			entries[i-1] = FilterEntry{
-				DocID:    i,
-				Field:    "category",
-				Category: categories[int(i)%len(categories)],
-			}
+			cats[i-1] = categories[int(i)%len(categories)]
 		}
 		b.ResetTimer()
 		for n := 0; n < b.N; n++ {
 			filter := NewBitmapFilter()
-			filter.SetBatch(entries)
+			batch := filter.BatchSize("category", numDocs)
+			for i := uint32(1); i <= numDocs; i++ {
+				batch.Add(i, cats[i-1])
+			}
+			batch.Flush()
 		}
 	})
 
@@ -649,18 +672,20 @@ func BenchmarkSetBatch(b *testing.B) {
 		}
 	})
 
-	b.Run("SortColumn/SetBatch", func(b *testing.B) {
-		entries := make([]ColumnEntry[uint16], numDocs)
+	b.Run("SortColumn/Batch", func(b *testing.B) {
+		// Pre-compute values
+		values := make([]uint16, numDocs)
 		for i := uint32(1); i <= numDocs; i++ {
-			entries[i-1] = ColumnEntry[uint16]{
-				DocID: i,
-				Value: uint16(i * 7 % 65536),
-			}
+			values[i-1] = uint16(i * 7 % 65536)
 		}
 		b.ResetTimer()
 		for n := 0; n < b.N; n++ {
 			col := NewSortColumn[uint16]()
-			col.SetBatch(entries)
+			batch := col.BatchSize(numDocs)
+			for i := uint32(1); i <= numDocs; i++ {
+				batch.Add(i, values[i-1])
+			}
+			batch.Flush()
 		}
 	})
 }
@@ -685,13 +710,8 @@ func BenchmarkFilterAndSort100M(b *testing.B) {
 	}
 
 	// Report memory usage
-	var totalBitmapBytes uint64
-	for _, fieldMap := range filter.Fields {
-		for _, bm := range fieldMap {
-			totalBitmapBytes += bm.GetSizeInBytes()
-		}
-	}
-	valuesBytes := uint64(len(col.Values) * 2) // uint16 = 2 bytes
+	totalBitmapBytes := filter.MemoryUsage()
+	valuesBytes := col.MemoryUsage()
 	b.Logf("Memory: bitmaps=%d bytes (%.2f MB), values=%d bytes (%.2f MB), total=%.2f MB",
 		totalBitmapBytes, float64(totalBitmapBytes)/(1024*1024),
 		valuesBytes, float64(valuesBytes)/(1024*1024),

@@ -72,9 +72,13 @@ idx := rs.NewIndex(3, rs.WithNormalizer(rs.NormalizeLowercase))
 
 // Index operations
 idx.Add(docID uint32, text string)    // Single document
-idx.AddBatch(docs []Document)          // Bulk insert (4x faster, auto-parallel)
 idx.Remove(docID uint32)
 idx.Clear()
+
+// Batch insertion (4x faster, auto-parallel)
+batch := idx.Batch()                  // or idx.BatchSize(n) for pre-allocation
+batch.Add(docID uint32, text string)
+batch.Flush()
 
 // Search methods
 idx.Search(query string) []uint32              // AND search
@@ -143,11 +147,15 @@ Provides O(1) category lookups using bitmap indexes. Supports multiple filter fi
 ```go
 filter := rs.NewBitmapFilter()
 
-// Index documents with categories
+// Single document
 filter.Set(1, "media_type", "book")
 filter.Set(1, "language", "english")
-filter.Set(2, "media_type", "movie")
-filter.Set(2, "language", "spanish")
+
+// Batch insertion (faster for bulk)
+batch := filter.Batch("media_type")  // or BatchSize("field", n)
+batch.Add(2, "movie")
+batch.Add(3, "book")
+batch.Flush()
 
 // Get bitmap for a category
 books := filter.Get("media_type", "book")       // bitmap of all books
@@ -175,10 +183,14 @@ Provides cache-efficient columnar sorting. Generic - supports any ordered type (
 // Create a typed sort column
 ratings := rs.NewSortColumn[uint16]()
 
-// Index document values
+// Single document
 ratings.Set(1, 85)
-ratings.Set(2, 92)
-ratings.Set(3, 78)
+
+// Batch insertion (faster for bulk)
+batch := ratings.Batch()  // or BatchSize(n)
+batch.Add(2, 92)
+batch.Add(3, 78)
+batch.Flush()
 
 // Sort doc IDs by value (descending, limit 100)
 results := ratings.SortDesc([]uint32{1, 2, 3}, 100)
@@ -293,16 +305,16 @@ Documents are randomly generated with:
 | Method | Time | Speedup |
 |--------|------|---------|
 | Add (sequential) | 7.5s | baseline |
-| AddBatch (16 workers) | 1.3s | **5.8x** |
+| Batch (16 workers) | 1.3s | **5.8x** |
 
-Use `AddBatch` for bulk indexing:
+Use `Batch` for bulk indexing:
 
 ```go
-docs := make([]rs.Document, numDocs)
-for i := range docs {
-    docs[i] = rs.Document{ID: uint32(i), Text: texts[i]}
+batch := idx.BatchSize(numDocs)
+for i, text := range texts {
+    batch.Add(uint32(i), text)
 }
-idx.AddBatch(docs) // Automatically uses all CPU cores
+batch.Flush() // Automatically uses all CPU cores
 ```
 
 See `bench_scale_test.go` and `bench_10m_test.go` for full benchmarks.

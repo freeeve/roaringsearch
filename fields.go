@@ -7,6 +7,7 @@ import (
 	"os"
 	"slices"
 	"sync"
+	"unsafe"
 
 	"github.com/RoaringBitmap/roaring"
 	"github.com/vmihailenco/msgpack/v5"
@@ -28,13 +29,13 @@ import (
 //	englishBooks := roaring.And(books, english)         // AND filter
 type BitmapFilter struct {
 	mu     sync.RWMutex
-	Fields map[string]map[string]*roaring.Bitmap
+	fields map[string]map[string]*roaring.Bitmap
 }
 
 // NewBitmapFilter creates a new bitmap filter.
 func NewBitmapFilter() *BitmapFilter {
 	return &BitmapFilter{
-		Fields: make(map[string]map[string]*roaring.Bitmap),
+		fields: make(map[string]map[string]*roaring.Bitmap),
 	}
 }
 
@@ -46,10 +47,10 @@ func (c *BitmapFilter) Set(docID uint32, field, category string) {
 }
 
 func (c *BitmapFilter) setLocked(docID uint32, field, category string) {
-	fieldMap, ok := c.Fields[field]
+	fieldMap, ok := c.fields[field]
 	if !ok {
 		fieldMap = make(map[string]*roaring.Bitmap)
-		c.Fields[field] = fieldMap
+		c.fields[field] = fieldMap
 	}
 
 	bm, ok := fieldMap[category]
@@ -60,25 +61,124 @@ func (c *BitmapFilter) setLocked(docID uint32, field, category string) {
 	bm.Add(docID)
 }
 
-// FilterEntry represents a single filter assignment for batch operations.
-type FilterEntry struct {
-	DocID    uint32
-	Field    string
-	Category string
+// FilterBatch accumulates entries for efficient batch insertion.
+type FilterBatch struct {
+	filter     *BitmapFilter
+	field      string
+	docIDs     []uint32
+	categories []string
 }
 
-// SetBatch assigns multiple documents to categories efficiently.
-// Acquires lock once for the entire batch.
-func (c *BitmapFilter) SetBatch(entries []FilterEntry) {
-	if len(entries) == 0 {
+// Batch creates a new batch builder for the given field.
+// Use BatchSize for better performance when you know the approximate count.
+func (c *BitmapFilter) Batch(field string) *FilterBatch {
+	return c.BatchSize(field, 1024)
+}
+
+// BatchSize creates a batch builder with pre-allocated capacity.
+func (c *BitmapFilter) BatchSize(field string, size int) *FilterBatch {
+	return &FilterBatch{
+		filter:     c,
+		field:      field,
+		docIDs:     make([]uint32, 0, size),
+		categories: make([]string, 0, size),
+	}
+}
+
+// Add adds a document with a category to the batch.
+func (b *FilterBatch) Add(docID uint32, category string) {
+	b.docIDs = append(b.docIDs, docID)
+	b.categories = append(b.categories, category)
+}
+
+// Flush commits all accumulated entries to the filter.
+func (b *FilterBatch) Flush() {
+	if len(b.docIDs) == 0 {
 		return
 	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
 
-	for i := range entries {
-		c.setLocked(entries[i].DocID, entries[i].Field, entries[i].Category)
+	n := len(b.docIDs)
+
+	// Pass 1: build integer index array using linear search (fast for few categories)
+	categoryList := make([]string, 0, 16)
+	indices := make([]int, n)
+
+	for i, cat := range b.categories {
+		// Linear search - faster than map for small category counts
+		idx := -1
+		for j, existing := range categoryList {
+			if existing == cat {
+				idx = j
+				break
+			}
+		}
+		if idx == -1 {
+			idx = len(categoryList)
+			categoryList = append(categoryList, cat)
+		}
+		indices[i] = idx
 	}
+
+	numCats := len(categoryList)
+
+	// Pass 2: count per category (fast integer array access)
+	counts := make([]int, numCats)
+	for _, idx := range indices {
+		counts[idx]++
+	}
+
+	// Pre-allocate exact-sized groups
+	groups := make([][]uint32, numCats)
+	for i, count := range counts {
+		groups[i] = make([]uint32, 0, count)
+	}
+
+	// Pass 3: fill groups (fast integer array access, no reallocation)
+	for i, idx := range indices {
+		groups[idx] = append(groups[idx], b.docIDs[i])
+	}
+
+	b.filter.mu.Lock()
+	defer b.filter.mu.Unlock()
+
+	fieldMap, ok := b.filter.fields[b.field]
+	if !ok {
+		fieldMap = make(map[string]*roaring.Bitmap)
+		b.filter.fields[b.field] = fieldMap
+	}
+
+	// Create bitmaps
+	bitmaps := make([]*roaring.Bitmap, numCats)
+	for idx := range groups {
+		cat := categoryList[idx]
+		bm, ok := fieldMap[cat]
+		if !ok {
+			bm = roaring.New()
+			fieldMap[cat] = bm
+		}
+		bitmaps[idx] = bm
+	}
+
+	// Parallel AddMany if enough categories
+	if numCats >= 4 {
+		var wg sync.WaitGroup
+		for idx, ids := range groups {
+			wg.Add(1)
+			go func(bm *roaring.Bitmap, docIDs []uint32) {
+				defer wg.Done()
+				bm.AddMany(docIDs)
+			}(bitmaps[idx], ids)
+		}
+		wg.Wait()
+	} else {
+		for idx, ids := range groups {
+			bitmaps[idx].AddMany(ids)
+		}
+	}
+
+	// Clear for reuse
+	b.docIDs = b.docIDs[:0]
+	b.categories = b.categories[:0]
 }
 
 // Remove removes a document from all categories across all fields.
@@ -86,7 +186,7 @@ func (c *BitmapFilter) Remove(docID uint32) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	for _, fieldMap := range c.Fields {
+	for _, fieldMap := range c.fields {
 		for _, bm := range fieldMap {
 			bm.Remove(docID)
 		}
@@ -99,7 +199,7 @@ func (c *BitmapFilter) Get(field, category string) *roaring.Bitmap {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	fieldMap, ok := c.Fields[field]
+	fieldMap, ok := c.fields[field]
 	if !ok {
 		return nil
 	}
@@ -111,7 +211,7 @@ func (c *BitmapFilter) GetAny(field string, categories []string) *roaring.Bitmap
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	fieldMap, ok := c.Fields[field]
+	fieldMap, ok := c.fields[field]
 	if !ok {
 		return roaring.New()
 	}
@@ -130,7 +230,7 @@ func (c *BitmapFilter) Categories(field string) []string {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	fieldMap, ok := c.Fields[field]
+	fieldMap, ok := c.fields[field]
 	if !ok {
 		return nil
 	}
@@ -147,7 +247,7 @@ func (c *BitmapFilter) Counts(field string) map[string]uint64 {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	fieldMap, ok := c.Fields[field]
+	fieldMap, ok := c.fields[field]
 	if !ok {
 		return nil
 	}
@@ -164,8 +264,8 @@ func (c *BitmapFilter) AllCounts() map[string]map[string]uint64 {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	result := make(map[string]map[string]uint64, len(c.Fields))
-	for field, fieldMap := range c.Fields {
+	result := make(map[string]map[string]uint64, len(c.fields))
+	for field, fieldMap := range c.fields {
 		counts := make(map[string]uint64, len(fieldMap))
 		for cat, bm := range fieldMap {
 			counts[cat] = bm.GetCardinality()
@@ -173,6 +273,20 @@ func (c *BitmapFilter) AllCounts() map[string]map[string]uint64 {
 		result[field] = counts
 	}
 	return result
+}
+
+// MemoryUsage returns the total memory used by all bitmaps in bytes.
+func (c *BitmapFilter) MemoryUsage() uint64 {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	var total uint64
+	for _, fieldMap := range c.fields {
+		for _, bm := range fieldMap {
+			total += bm.GetSizeInBytes()
+		}
+	}
+	return total
 }
 
 // bitmapFilterData is the serializable representation.
@@ -196,10 +310,10 @@ func (c *BitmapFilter) Encode(w io.Writer) error {
 	defer c.mu.RUnlock()
 
 	data := bitmapFilterData{
-		Fields: make(map[string]map[string][]byte, len(c.Fields)),
+		Fields: make(map[string]map[string][]byte, len(c.fields)),
 	}
 
-	for field, fieldMap := range c.Fields {
+	for field, fieldMap := range c.fields {
 		data.Fields[field] = make(map[string][]byte, len(fieldMap))
 		for cat, bm := range fieldMap {
 			bytes, err := bm.ToBytes()
@@ -231,17 +345,17 @@ func ReadBitmapFilter(r io.Reader) (*BitmapFilter, error) {
 	}
 
 	c := &BitmapFilter{
-		Fields: make(map[string]map[string]*roaring.Bitmap, len(data.Fields)),
+		fields: make(map[string]map[string]*roaring.Bitmap, len(data.Fields)),
 	}
 
 	for field, fieldMap := range data.Fields {
-		c.Fields[field] = make(map[string]*roaring.Bitmap, len(fieldMap))
+		c.fields[field] = make(map[string]*roaring.Bitmap, len(fieldMap))
 		for cat, bytes := range fieldMap {
 			bm := roaring.New()
 			if err := bm.UnmarshalBinary(bytes); err != nil {
 				return nil, err
 			}
-			c.Fields[field][cat] = bm
+			c.fields[field][cat] = bm
 		}
 	}
 
@@ -264,7 +378,7 @@ func ReadBitmapFilter(r io.Reader) (*BitmapFilter, error) {
 //	results := ratings.SortBitmapDesc(filteredBitmap, 100)
 type SortColumn[T cmp.Ordered] struct {
 	mu       sync.RWMutex
-	Values   []T
+	values   []T
 	maxDocID uint32
 }
 
@@ -277,7 +391,7 @@ type SortedResult[T cmp.Ordered] struct {
 // NewSortColumn creates a new typed sort column.
 func NewSortColumn[T cmp.Ordered]() *SortColumn[T] {
 	return &SortColumn[T]{
-		Values: make([]T, 0),
+		values: make([]T, 0),
 	}
 }
 
@@ -290,64 +404,89 @@ func (col *SortColumn[T]) Set(docID uint32, value T) {
 
 func (col *SortColumn[T]) setLocked(docID uint32, value T) {
 	// Grow array if needed
-	if docID >= uint32(len(col.Values)) {
+	if docID >= uint32(len(col.values)) {
 		newSize := docID + 1
-		if newSize < uint32(len(col.Values)*5/4) {
-			newSize = uint32(len(col.Values) * 5 / 4)
+		if newSize < uint32(len(col.values)*5/4) {
+			newSize = uint32(len(col.values) * 5 / 4)
 		}
 		if newSize < 1024 {
 			newSize = 1024
 		}
 		newValues := make([]T, newSize)
-		copy(newValues, col.Values)
-		col.Values = newValues
+		copy(newValues, col.values)
+		col.values = newValues
 	}
 
-	col.Values[docID] = value
+	col.values[docID] = value
 
 	if docID > col.maxDocID {
 		col.maxDocID = docID
 	}
 }
 
-// ColumnEntry represents a single value assignment for batch operations.
-type ColumnEntry[T cmp.Ordered] struct {
-	DocID uint32
-	Value T
+// SortColumnBatch accumulates entries for efficient batch insertion.
+type SortColumnBatch[T cmp.Ordered] struct {
+	col    *SortColumn[T]
+	docIDs []uint32
+	values []T
 }
 
-// SetBatch sets multiple values efficiently.
-// Pre-allocates to max docID and acquires lock once.
-func (col *SortColumn[T]) SetBatch(entries []ColumnEntry[T]) {
-	if len(entries) == 0 {
+// Batch creates a new batch builder for this column.
+// Use BatchSize for better performance when you know the approximate count.
+func (col *SortColumn[T]) Batch() *SortColumnBatch[T] {
+	return col.BatchSize(1024)
+}
+
+// BatchSize creates a batch builder with pre-allocated capacity.
+func (col *SortColumn[T]) BatchSize(size int) *SortColumnBatch[T] {
+	return &SortColumnBatch[T]{
+		col:    col,
+		docIDs: make([]uint32, 0, size),
+		values: make([]T, 0, size),
+	}
+}
+
+// Add adds a document with a value to the batch.
+func (b *SortColumnBatch[T]) Add(docID uint32, value T) {
+	b.docIDs = append(b.docIDs, docID)
+	b.values = append(b.values, value)
+}
+
+// Flush commits all accumulated entries to the column.
+func (b *SortColumnBatch[T]) Flush() {
+	if len(b.docIDs) == 0 {
 		return
 	}
 
 	// Find max docID to pre-allocate
 	var maxID uint32
-	for i := range entries {
-		if entries[i].DocID > maxID {
-			maxID = entries[i].DocID
+	for _, id := range b.docIDs {
+		if id > maxID {
+			maxID = id
 		}
 	}
 
-	col.mu.Lock()
-	defer col.mu.Unlock()
+	b.col.mu.Lock()
+	defer b.col.mu.Unlock()
 
 	// Pre-allocate if needed
-	if maxID >= uint32(len(col.Values)) {
+	if maxID >= uint32(len(b.col.values)) {
 		newValues := make([]T, maxID+1)
-		copy(newValues, col.Values)
-		col.Values = newValues
+		copy(newValues, b.col.values)
+		b.col.values = newValues
 	}
 
 	// Set all values
-	for i := range entries {
-		col.Values[entries[i].DocID] = entries[i].Value
-		if entries[i].DocID > col.maxDocID {
-			col.maxDocID = entries[i].DocID
+	for i, id := range b.docIDs {
+		b.col.values[id] = b.values[i]
+		if id > b.col.maxDocID {
+			b.col.maxDocID = id
 		}
 	}
+
+	// Clear for reuse
+	b.docIDs = b.docIDs[:0]
+	b.values = b.values[:0]
 }
 
 // Get returns the value for a document.
@@ -356,10 +495,19 @@ func (col *SortColumn[T]) Get(docID uint32) T {
 	defer col.mu.RUnlock()
 
 	var zero T
-	if docID >= uint32(len(col.Values)) {
+	if docID >= uint32(len(col.values)) {
 		return zero
 	}
-	return col.Values[docID]
+	return col.values[docID]
+}
+
+// MemoryUsage returns the memory used by the values array in bytes.
+func (col *SortColumn[T]) MemoryUsage() uint64 {
+	col.mu.RLock()
+	defer col.mu.RUnlock()
+
+	var zero T
+	return uint64(len(col.values)) * uint64(unsafe.Sizeof(zero))
 }
 
 // Sort sorts document IDs by their value.
@@ -398,7 +546,7 @@ func (col *SortColumn[T]) sortLocked(docIDs []uint32, asc bool, limit int) []Sor
 		return nil
 	}
 
-	values := col.Values
+	values := col.values
 
 	// Use heap for partial sort when limit is small relative to input
 	if limit > 0 && limit < len(docIDs)/4 {
@@ -521,7 +669,7 @@ func (col *SortColumn[T]) Encode(w io.Writer) error {
 	defer col.mu.RUnlock()
 
 	data := sortColumnData[T]{
-		Values:   col.Values[:col.maxDocID+1],
+		Values:   col.values[:col.maxDocID+1],
 		MaxDocID: col.maxDocID,
 	}
 
@@ -546,7 +694,7 @@ func ReadSortColumn[T cmp.Ordered](r io.Reader) (*SortColumn[T], error) {
 	}
 
 	return &SortColumn[T]{
-		Values:   data.Values,
+		values:   data.Values,
 		maxDocID: data.MaxDocID,
 	}, nil
 }
