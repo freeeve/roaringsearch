@@ -329,10 +329,10 @@ func (c *BitmapFilter) SaveToFile(path string) error {
 }
 
 // Encode writes the bitmap filter to a writer.
+// Takes a snapshot of the data first to avoid holding the lock during I/O.
 func (c *BitmapFilter) Encode(w io.Writer) error {
+	// Snapshot data while holding lock briefly
 	c.mu.RLock()
-	defer c.mu.RUnlock()
-
 	data := bitmapFilterData{
 		Fields: make(map[string]map[string][]byte, len(c.fields)),
 	}
@@ -342,12 +342,15 @@ func (c *BitmapFilter) Encode(w io.Writer) error {
 		for cat, bm := range fieldMap {
 			bytes, err := bm.ToBytes()
 			if err != nil {
+				c.mu.RUnlock()
 				return err
 			}
 			data.Fields[field][cat] = bytes
 		}
 	}
+	c.mu.RUnlock()
 
+	// Write without holding lock - safe for concurrent reads/writes
 	return msgpack.NewEncoder(w).Encode(data)
 }
 
@@ -712,13 +715,19 @@ func (col *SortColumn[T]) SaveToFile(path string) error {
 }
 
 // Encode writes the sort column to a writer.
+// Takes a snapshot of the data first to avoid holding the lock during I/O.
 func (col *SortColumn[T]) Encode(w io.Writer) error {
+	// Snapshot data while holding lock briefly
 	col.mu.RLock()
-	defer col.mu.RUnlock()
+	valuesCopy := make([]T, col.maxDocID+1)
+	copy(valuesCopy, col.values[:col.maxDocID+1])
+	maxDocID := col.maxDocID
+	col.mu.RUnlock()
 
+	// Write without holding lock - safe for concurrent reads/writes
 	data := sortColumnData[T]{
-		Values:   col.values[:col.maxDocID+1],
-		MaxDocID: col.maxDocID,
+		Values:   valuesCopy,
+		MaxDocID: maxDocID,
 	}
 
 	return msgpack.NewEncoder(w).Encode(data)
