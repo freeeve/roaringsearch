@@ -287,16 +287,31 @@ func (idx *Index) mergeLocalIndexes(localIndexes []localIndex) {
 		localIndexes = localIndexes[:half]
 	}
 
-	// Final merge into main index
-	idx.mu.Lock()
-	defer idx.mu.Unlock()
+	// Final merge into main index - incremental to allow reads between batches
+	local := localIndexes[0].bitmaps
+	keys := make([]uint64, 0, len(local))
+	for k := range local {
+		keys = append(keys, k)
+	}
 
-	for key, localBm := range localIndexes[0].bitmaps {
-		if bm, ok := idx.bitmaps[key]; ok {
-			bm.Or(localBm)
-		} else {
-			idx.bitmaps[key] = localBm
+	const mergeBatchSize = 1000
+	for i := 0; i < len(keys); i += mergeBatchSize {
+		end := i + mergeBatchSize
+		if end > len(keys) {
+			end = len(keys)
 		}
+
+		idx.mu.Lock()
+		for _, key := range keys[i:end] {
+			localBm := local[key]
+			if bm, ok := idx.bitmaps[key]; ok {
+				bm.Or(localBm)
+			} else {
+				idx.bitmaps[key] = localBm
+			}
+			delete(local, key) // free memory as we go
+		}
+		idx.mu.Unlock()
 	}
 }
 
