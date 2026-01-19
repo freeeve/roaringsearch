@@ -7,6 +7,7 @@ import (
 	"os"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"unsafe"
 
 	"github.com/RoaringBitmap/roaring"
@@ -30,6 +31,7 @@ import (
 type BitmapFilter struct {
 	mu     sync.RWMutex
 	fields map[string]map[string]*roaring.Bitmap
+	dirty  atomic.Bool
 }
 
 // NewBitmapFilter creates a new bitmap filter.
@@ -59,6 +61,7 @@ func (c *BitmapFilter) setLocked(docID uint32, field, category string) {
 		fieldMap[category] = bm
 	}
 	bm.Add(docID)
+	c.dirty.Store(true)
 }
 
 // FilterBatch accumulates entries for efficient batch insertion.
@@ -191,6 +194,7 @@ func (c *BitmapFilter) Remove(docID uint32) {
 			bm.Remove(docID)
 		}
 	}
+	c.dirty.Store(true)
 }
 
 // Get returns a bitmap of documents in the given category for a field.
@@ -297,6 +301,10 @@ type bitmapFilterData struct {
 // SaveToFile saves the bitmap filter to a file atomically.
 // Writes to a temp file first, then renames to prevent corruption on crash.
 func (c *BitmapFilter) SaveToFile(path string) error {
+	if !c.dirty.Load() {
+		return nil
+	}
+
 	tmpPath := path + ".tmp"
 	file, err := os.Create(tmpPath)
 	if err != nil {
@@ -325,6 +333,7 @@ func (c *BitmapFilter) SaveToFile(path string) error {
 		return err
 	}
 
+	c.dirty.Store(false)
 	return nil
 }
 
@@ -407,6 +416,7 @@ type SortColumn[T cmp.Ordered] struct {
 	mu       sync.RWMutex
 	values   []T
 	maxDocID uint32
+	dirty    atomic.Bool
 }
 
 // SortedResult holds a document ID and its sort value.
@@ -449,6 +459,7 @@ func (col *SortColumn[T]) setLocked(docID uint32, value T) {
 	if docID > col.maxDocID {
 		col.maxDocID = docID
 	}
+	col.dirty.Store(true)
 }
 
 // SortColumnBatch accumulates entries for efficient batch insertion.
@@ -683,6 +694,10 @@ type sortColumnData[T cmp.Ordered] struct {
 // SaveToFile saves the sort column to a file atomically.
 // Writes to a temp file first, then renames to prevent corruption on crash.
 func (col *SortColumn[T]) SaveToFile(path string) error {
+	if !col.dirty.Load() {
+		return nil
+	}
+
 	tmpPath := path + ".tmp"
 	file, err := os.Create(tmpPath)
 	if err != nil {
@@ -711,6 +726,7 @@ func (col *SortColumn[T]) SaveToFile(path string) error {
 		return err
 	}
 
+	col.dirty.Store(false)
 	return nil
 }
 
