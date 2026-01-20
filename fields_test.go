@@ -248,7 +248,7 @@ func TestBitmapFilterPersistence(t *testing.T) {
 
 	// Save
 	if err := filter.SaveToFile(path); err != nil {
-		t.Fatalf("SaveToFile failed: %v", err)
+		t.Fatalf(errSaveToFile, err)
 	}
 
 	// Load
@@ -289,7 +289,7 @@ func TestSortColumnPersistence(t *testing.T) {
 
 	// Save
 	if err := col.SaveToFile(path); err != nil {
-		t.Fatalf("SaveToFile failed: %v", err)
+		t.Fatalf(errSaveToFile, err)
 	}
 
 	// Load
@@ -641,7 +641,7 @@ func TestSaveToFileCreatesFileWhenNotDirty(t *testing.T) {
 
 		// New filter has dirty=false, SaveToFile should still create the file
 		if err := filter.SaveToFile(path); err != nil {
-			t.Fatalf("SaveToFile failed: %v", err)
+			t.Fatalf(errSaveToFile, err)
 		}
 
 		// Verify file was actually created
@@ -665,7 +665,7 @@ func TestSaveToFileCreatesFileWhenNotDirty(t *testing.T) {
 
 		// New column has dirty=false, SaveToFile should still create the file
 		if err := col.SaveToFile(path); err != nil {
-			t.Fatalf("SaveToFile failed: %v", err)
+			t.Fatalf(errSaveToFile, err)
 		}
 
 		// Verify file was actually created

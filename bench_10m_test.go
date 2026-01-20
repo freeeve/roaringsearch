@@ -82,7 +82,7 @@ func getOrCreate10MIndexFile(b *testing.B) string {
 
 func BenchmarkSearch10M_ShortQuery(b *testing.B) {
 	if testing.Short() {
-		b.Skip("skipping 10M benchmark in short mode")
+		b.Skip(testSkip10MBenchmark)
 	}
 
 	idx := getOrCreate10MIndex(b)
@@ -96,11 +96,11 @@ func BenchmarkSearch10M_ShortQuery(b *testing.B) {
 
 func BenchmarkSearch10M_MediumQuery(b *testing.B) {
 	if testing.Short() {
-		b.Skip("skipping 10M benchmark in short mode")
+		b.Skip(testSkip10MBenchmark)
 	}
 
 	idx := getOrCreate10MIndex(b)
-	queries := []string{"server client", "john database", "network protocol"}
+	queries := []string{testServerClient, "john database", "network protocol"}
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -110,7 +110,7 @@ func BenchmarkSearch10M_MediumQuery(b *testing.B) {
 
 func BenchmarkSearch10M_LongQuery(b *testing.B) {
 	if testing.Short() {
-		b.Skip("skipping 10M benchmark in short mode")
+		b.Skip(testSkip10MBenchmark)
 	}
 
 	idx := getOrCreate10MIndex(b)
@@ -127,7 +127,7 @@ func BenchmarkSearch10M_LongQuery(b *testing.B) {
 
 func BenchmarkSearch10M_HighSelectivity(b *testing.B) {
 	if testing.Short() {
-		b.Skip("skipping 10M benchmark in short mode")
+		b.Skip(testSkip10MBenchmark)
 	}
 
 	idx := getOrCreate10MIndex(b)
@@ -141,7 +141,7 @@ func BenchmarkSearch10M_HighSelectivity(b *testing.B) {
 
 func BenchmarkSearch10M_NoMatch(b *testing.B) {
 	if testing.Short() {
-		b.Skip("skipping 10M benchmark in short mode")
+		b.Skip(testSkip10MBenchmark)
 	}
 
 	idx := getOrCreate10MIndex(b)
@@ -159,11 +159,11 @@ func BenchmarkSearch10M_NoMatch(b *testing.B) {
 
 func BenchmarkSearchAny10M(b *testing.B) {
 	if testing.Short() {
-		b.Skip("skipping 10M benchmark in short mode")
+		b.Skip(testSkip10MBenchmark)
 	}
 
 	idx := getOrCreate10MIndex(b)
-	queries := []string{"server client", "john database", "network protocol"}
+	queries := []string{testServerClient, "john database", "network protocol"}
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -177,7 +177,7 @@ func BenchmarkSearchAny10M(b *testing.B) {
 
 func BenchmarkSearchThreshold10M(b *testing.B) {
 	if testing.Short() {
-		b.Skip("skipping 10M benchmark in short mode")
+		b.Skip(testSkip10MBenchmark)
 	}
 
 	idx := getOrCreate10MIndex(b)
@@ -208,7 +208,7 @@ func BenchmarkSearchThreshold10M(b *testing.B) {
 
 func BenchmarkSearchCount10M(b *testing.B) {
 	if testing.Short() {
-		b.Skip("skipping 10M benchmark in short mode")
+		b.Skip(testSkip10MBenchmark)
 	}
 
 	idx := getOrCreate10MIndex(b)
@@ -226,7 +226,7 @@ func BenchmarkSearchCount10M(b *testing.B) {
 
 func BenchmarkCachedSearch10M_ColdCache(b *testing.B) {
 	if testing.Short() {
-		b.Skip("skipping 10M benchmark in short mode")
+		b.Skip(testSkip10MBenchmark)
 	}
 
 	path := getOrCreate10MIndexFile(b)
@@ -244,7 +244,7 @@ func BenchmarkCachedSearch10M_ColdCache(b *testing.B) {
 
 func BenchmarkCachedSearch10M_WarmCache(b *testing.B) {
 	if testing.Short() {
-		b.Skip("skipping 10M benchmark in short mode")
+		b.Skip(testSkip10MBenchmark)
 	}
 
 	path := getOrCreate10MIndexFile(b)
@@ -272,7 +272,7 @@ func BenchmarkCachedSearch10M_WarmCache(b *testing.B) {
 
 func BenchmarkSerialize10M(b *testing.B) {
 	if testing.Short() {
-		b.Skip("skipping 10M benchmark in short mode")
+		b.Skip(testSkip10MBenchmark)
 	}
 
 	idx := getOrCreate10MIndex(b)
@@ -289,7 +289,7 @@ func BenchmarkSerialize10M(b *testing.B) {
 
 func BenchmarkDeserialize10M(b *testing.B) {
 	if testing.Short() {
-		b.Skip("skipping 10M benchmark in short mode")
+		b.Skip(testSkip10MBenchmark)
 	}
 
 	path := getOrCreate10MIndexFile(b)
@@ -309,7 +309,7 @@ func BenchmarkDeserialize10M(b *testing.B) {
 
 func BenchmarkSearchConcurrent10M(b *testing.B) {
 	if testing.Short() {
-		b.Skip("skipping 10M benchmark in short mode")
+		b.Skip(testSkip10MBenchmark)
 	}
 
 	idx := getOrCreate10MIndex(b)
@@ -331,7 +331,7 @@ func BenchmarkSearchConcurrent10M(b *testing.B) {
 
 func BenchmarkCompareSearchMethods10M(b *testing.B) {
 	if testing.Short() {
-		b.Skip("skipping 10M benchmark in short mode")
+		b.Skip(testSkip10MBenchmark)
 	}
 
 	idx := getOrCreate10MIndex(b)
@@ -394,7 +394,7 @@ func BenchmarkCompareSearchMethods10M(b *testing.B) {
 
 func BenchmarkMemoryUsage10M(b *testing.B) {
 	if testing.Short() {
-		b.Skip("skipping 10M benchmark in short mode")
+		b.Skip(testSkip10MBenchmark)
 	}
 
 	var m runtime.MemStats
@@ -443,7 +443,7 @@ func TestSearchResultSizes10M(t *testing.T) {
 		"common_short":  "the",
 		"common_medium": "the and",
 		"tech_short":    "server",
-		"tech_medium":   "server client",
+		"tech_medium":   testServerClient,
 		"name_short":    "john",
 		"rare_word":     "xylophone",
 		"no_match":      "zzzzz",
