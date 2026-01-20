@@ -302,7 +302,10 @@ type bitmapFilterData struct {
 // Writes to a temp file first, then renames to prevent corruption on crash.
 func (c *BitmapFilter) SaveToFile(path string) error {
 	if !c.dirty.Load() {
-		return nil
+		if _, err := os.Stat(path); err == nil {
+			return nil // File exists and no changes - safe to skip
+		}
+		// File doesn't exist, must create it even if not dirty
 	}
 
 	tmpPath := path + ".tmp"
@@ -705,7 +708,10 @@ type sortColumnData[T cmp.Ordered] struct {
 // Writes to a temp file first, then renames to prevent corruption on crash.
 func (col *SortColumn[T]) SaveToFile(path string) error {
 	if !col.dirty.Load() {
-		return nil
+		if _, err := os.Stat(path); err == nil {
+			return nil // File exists and no changes - safe to skip
+		}
+		// File doesn't exist, must create it even if not dirty
 	}
 
 	tmpPath := path + ".tmp"
@@ -745,8 +751,11 @@ func (col *SortColumn[T]) SaveToFile(path string) error {
 func (col *SortColumn[T]) Encode(w io.Writer) error {
 	// Snapshot data while holding lock briefly
 	col.mu.RLock()
-	valuesCopy := make([]T, col.maxDocID+1)
-	copy(valuesCopy, col.values[:col.maxDocID+1])
+	var valuesCopy []T
+	if len(col.values) > 0 {
+		valuesCopy = make([]T, col.maxDocID+1)
+		copy(valuesCopy, col.values[:col.maxDocID+1])
+	}
 	maxDocID := col.maxDocID
 	col.mu.RUnlock()
 

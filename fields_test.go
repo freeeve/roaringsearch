@@ -2,6 +2,7 @@ package roaringsearch
 
 import (
 	"container/heap"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -626,6 +627,61 @@ func TestBitmapFilterAllCounts(t *testing.T) {
 	if allCounts["language"]["spanish"] != 1 {
 		t.Errorf("language.spanish = %d, want 1", allCounts["language"]["spanish"])
 	}
+}
+
+// TestSaveToFileCreatesFileWhenNotDirty is a regression test for a bug where
+// SaveToFile would return success but not create the file when dirty=false.
+// See: https://github.com/freeeve/roaringsearch/issues/XXX
+func TestSaveToFileCreatesFileWhenNotDirty(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	t.Run("BitmapFilter", func(t *testing.T) {
+		filter := NewBitmapFilter()
+		path := filepath.Join(tmpDir, "filter_not_dirty.idx")
+
+		// New filter has dirty=false, SaveToFile should still create the file
+		if err := filter.SaveToFile(path); err != nil {
+			t.Fatalf("SaveToFile failed: %v", err)
+		}
+
+		// Verify file was actually created
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			t.Fatal("SaveToFile returned success but file was not created")
+		}
+
+		// Verify we can load the file
+		loaded, err := LoadBitmapFilter(path)
+		if err != nil {
+			t.Fatalf("LoadBitmapFilter failed: %v", err)
+		}
+		if loaded == nil {
+			t.Fatal("LoadBitmapFilter returned nil")
+		}
+	})
+
+	t.Run("SortColumn", func(t *testing.T) {
+		col := NewSortColumn[uint16]()
+		path := filepath.Join(tmpDir, "column_not_dirty.idx")
+
+		// New column has dirty=false, SaveToFile should still create the file
+		if err := col.SaveToFile(path); err != nil {
+			t.Fatalf("SaveToFile failed: %v", err)
+		}
+
+		// Verify file was actually created
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			t.Fatal("SaveToFile returned success but file was not created")
+		}
+
+		// Verify we can load the file
+		loaded, err := LoadSortColumn[uint16](path)
+		if err != nil {
+			t.Fatalf("LoadSortColumn failed: %v", err)
+		}
+		if loaded == nil {
+			t.Fatal("LoadSortColumn returned nil")
+		}
+	})
 }
 
 func BenchmarkBatch(b *testing.B) {
