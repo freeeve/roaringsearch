@@ -432,6 +432,37 @@ func (idx *Index) Search(query string) []uint32 {
 	return result.ToArray()
 }
 
+// collectQueryBitmaps collects bitmaps for query n-grams.
+// Returns nil if any n-gram is not found in the index.
+func (idx *Index) collectQueryBitmaps(runes []rune) []*roaring.Bitmap {
+	bitmaps := make([]*roaring.Bitmap, 0, len(runes)-idx.gramSize+1)
+	seen := make(map[uint64]struct{})
+
+	for i := 0; i <= len(runes)-idx.gramSize; i++ {
+		key := runeNgramKey(runes[i : i+idx.gramSize])
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		bm, ok := idx.bitmaps[key]
+		if !ok {
+			return nil
+		}
+		bitmaps = append(bitmaps, bm)
+	}
+	return bitmaps
+}
+
+// existsInAllBitmaps returns true if docID exists in all bitmaps.
+func existsInAllBitmaps(docID uint32, bitmaps []*roaring.Bitmap) bool {
+	for _, bm := range bitmaps {
+		if !bm.Contains(docID) {
+			return false
+		}
+	}
+	return true
+}
+
 // SearchWithLimit returns up to limit matching document IDs.
 // This can be faster than Search when you only need a subset of results.
 func (idx *Index) SearchWithLimit(query string, limit int) []uint32 {
@@ -449,52 +480,23 @@ func (idx *Index) SearchWithLimit(query string, limit int) []uint32 {
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
 
-	bitmaps := make([]*roaring.Bitmap, 0, len(runes)-idx.gramSize+1)
-	seen := make(map[uint64]struct{})
-
-	for i := 0; i <= len(runes)-idx.gramSize; i++ {
-		key := runeNgramKey(runes[i : i+idx.gramSize])
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
-		bm, ok := idx.bitmaps[key]
-		if !ok {
-			return nil
-		}
-		bitmaps = append(bitmaps, bm)
-	}
-
+	bitmaps := idx.collectQueryBitmaps(runes)
 	if len(bitmaps) == 0 {
 		return nil
 	}
 
-	// Sort by cardinality for better performance
 	sort.Slice(bitmaps, func(i, j int) bool {
 		return bitmaps[i].GetCardinality() < bitmaps[j].GetCardinality()
 	})
 
-	// Use iterator-based intersection with early termination
 	results := make([]uint32, 0, limit)
-
-	// Start with smallest bitmap and check against others
 	smallest := bitmaps[0]
 	rest := bitmaps[1:]
 
 	it := smallest.Iterator()
 	for it.HasNext() && len(results) < limit {
 		docID := it.Next()
-
-		// Check if docID exists in all other bitmaps
-		found := true
-		for _, bm := range rest {
-			if !bm.Contains(docID) {
-				found = false
-				break
-			}
-		}
-
-		if found {
+		if existsInAllBitmaps(docID, rest) {
 			results = append(results, docID)
 		}
 	}
