@@ -57,9 +57,9 @@ func TestSearchAny(t *testing.T) {
 func TestSearchAnyCount(t *testing.T) {
 	idx := NewIndex(3)
 
-	idx.Add(1, "hello world")
-	idx.Add(2, "hello there")
-	idx.Add(3, "goodbye world")
+	idx.Add(1, testHelloWorld)
+	idx.Add(2, testHelloThere)
+	idx.Add(3, testGoodbyeWorld)
 
 	count := idx.SearchAnyCount("hello")
 	if count != 2 {
@@ -70,9 +70,9 @@ func TestSearchAnyCount(t *testing.T) {
 func TestSearchThreshold(t *testing.T) {
 	idx := NewIndex(3)
 
-	idx.Add(1, "hello world")   // ngrams: hel, ell, llo, owo, wor, orl, rld
-	idx.Add(2, "hello there")   // ngrams: hel, ell, llo, oth, the, her, ere
-	idx.Add(3, "goodbye world") // ngrams: goo, ood, odb, dby, bye, ewo, wor, orl, rld
+	idx.Add(1, testHelloWorld)   // ngrams: hel, ell, llo, owo, wor, orl, rld
+	idx.Add(2, testHelloThere)   // ngrams: hel, ell, llo, oth, the, her, ere
+	idx.Add(3, testGoodbyeWorld) // ngrams: goo, ood, odb, dby, bye, ewo, wor, orl, rld
 
 	// Search "hello" (hel, ell, llo) with threshold 2
 	result := idx.SearchThreshold("hello", 2)
@@ -172,7 +172,7 @@ func TestMixedLanguageIndex(t *testing.T) {
 	// Test that ASCII and Unicode documents coexist correctly
 	idx := NewIndex(2)
 
-	idx.Add(1, "hello world")
+	idx.Add(1, testHelloWorld)
 	idx.Add(2, "Hello 世界") // hello world in mixed
 	idx.Add(3, "世界和平")     // world peace in Chinese
 
@@ -198,17 +198,17 @@ func TestEmptyQuery(t *testing.T) {
 	// Empty query should return nil
 	results := idx.Search("")
 	if results != nil {
-		t.Errorf("empty query should return nil, got %v", results)
+		t.Errorf(errEmptyQueryResult, results)
 	}
 
 	results = idx.SearchAny("")
 	if results != nil {
-		t.Errorf("empty query should return nil, got %v", results)
+		t.Errorf(errEmptyQueryResult, results)
 	}
 
 	result := idx.SearchThreshold("", 1)
 	if result.DocIDs != nil {
-		t.Errorf("empty query should return nil, got %v", result.DocIDs)
+		t.Errorf(errEmptyQueryResult, result.DocIDs)
 	}
 }
 
@@ -226,8 +226,8 @@ func TestShortQuery(t *testing.T) {
 func TestSearchWithLimit(t *testing.T) {
 	idx := NewIndex(3)
 
-	idx.Add(1, "hello world")
-	idx.Add(2, "hello there")
+	idx.Add(1, testHelloWorld)
+	idx.Add(2, testHelloThere)
 	idx.Add(3, "hello everyone")
 	idx.Add(4, "hello friend")
 	idx.Add(5, "hello neighbor")
@@ -272,8 +272,8 @@ func TestSearchWithLimit(t *testing.T) {
 func TestSearchCallback(t *testing.T) {
 	idx := NewIndex(3)
 
-	idx.Add(1, "hello world")
-	idx.Add(2, "hello there")
+	idx.Add(1, testHelloWorld)
+	idx.Add(2, testHelloThere)
 	idx.Add(3, "hello everyone")
 
 	// Collect all results via callback
@@ -329,9 +329,9 @@ func TestSearchCallback(t *testing.T) {
 func TestSearchCount(t *testing.T) {
 	idx := NewIndex(3)
 
-	idx.Add(1, "hello world")
-	idx.Add(2, "hello there")
-	idx.Add(3, "goodbye world")
+	idx.Add(1, testHelloWorld)
+	idx.Add(2, testHelloThere)
+	idx.Add(3, testGoodbyeWorld)
 
 	count := idx.SearchCount("hello")
 	if count != 2 {
@@ -398,7 +398,7 @@ func TestSearchDuplicateNgrams(t *testing.T) {
 
 func TestRemoveNonexistent(t *testing.T) {
 	idx := NewIndex(3)
-	idx.Add(1, "hello world")
+	idx.Add(1, testHelloWorld)
 
 	// Remove doc that doesn't exist - should not panic
 	idx.Remove(999)
@@ -500,7 +500,7 @@ func TestBatchEmpty(t *testing.T) {
 func TestBatchBigrams(t *testing.T) {
 	idx := NewIndex(2)
 	batch := idx.Batch()
-	batch.Add(1, "hello world")
+	batch.Add(1, testHelloWorld)
 	batch.Add(2, "hi there")
 	batch.Add(3, "hey you")
 	batch.Flush()
@@ -530,7 +530,7 @@ func BenchmarkAdd(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		idx.Add(uint32(i), "The quick brown fox jumps over the lazy dog")
+		idx.Add(uint32(i), testQuickBrownFox)
 	}
 }
 
@@ -539,7 +539,7 @@ func BenchmarkSearch(b *testing.B) {
 
 	// Add some documents
 	for i := 0; i < 10000; i++ {
-		idx.Add(uint32(i), "The quick brown fox jumps over the lazy dog")
+		idx.Add(uint32(i), testQuickBrownFox)
 	}
 
 	b.ResetTimer()
@@ -553,7 +553,7 @@ func BenchmarkSearchThreshold(b *testing.B) {
 
 	// Add some documents
 	for i := 0; i < 10000; i++ {
-		idx.Add(uint32(i), "The quick brown fox jumps over the lazy dog")
+		idx.Add(uint32(i), testQuickBrownFox)
 	}
 
 	b.ResetTimer()
@@ -566,9 +566,9 @@ func TestIndexBatch(t *testing.T) {
 	idx := NewIndex(3)
 
 	batch := idx.Batch()
-	batch.Add(1, "hello world")
-	batch.Add(2, "hello there")
-	batch.Add(3, "goodbye world")
+	batch.Add(1, testHelloWorld)
+	batch.Add(2, testHelloThere)
+	batch.Add(3, testGoodbyeWorld)
 	batch.Flush()
 
 	// Verify search works
@@ -602,7 +602,7 @@ func TestIndexBatch(t *testing.T) {
 func BenchmarkIndexBatch(b *testing.B) {
 	const numDocs = 100_000
 	texts := []string{
-		"The quick brown fox jumps over the lazy dog",
+		testQuickBrownFox,
 		"Pack my box with five dozen liquor jugs",
 		"How vexingly quick daft zebras jump",
 		"The five boxing wizards jump quickly",
