@@ -94,27 +94,24 @@ func (b *FilterBatch) Add(docID uint32, category string) {
 	b.categories = append(b.categories, category)
 }
 
-// Flush commits all accumulated entries to the filter.
-func (b *FilterBatch) Flush() {
-	if len(b.docIDs) == 0 {
-		return
+// findCategoryIndex returns the index of category in the list, or -1 if not found.
+func findCategoryIndex(categoryList []string, cat string) int {
+	for j, existing := range categoryList {
+		if existing == cat {
+			return j
+		}
 	}
+	return -1
+}
 
+// buildCategoryGroups builds category list, indices, and grouped doc IDs.
+func (b *FilterBatch) buildCategoryGroups() ([]string, [][]uint32) {
 	n := len(b.docIDs)
-
-	// Pass 1: build integer index array using linear search (fast for few categories)
 	categoryList := make([]string, 0, 16)
 	indices := make([]int, n)
 
 	for i, cat := range b.categories {
-		// Linear search - faster than map for small category counts
-		idx := -1
-		for j, existing := range categoryList {
-			if existing == cat {
-				idx = j
-				break
-			}
-		}
+		idx := findCategoryIndex(categoryList, cat)
 		if idx == -1 {
 			idx = len(categoryList)
 			categoryList = append(categoryList, cat)
@@ -123,23 +120,44 @@ func (b *FilterBatch) Flush() {
 	}
 
 	numCats := len(categoryList)
-
-	// Pass 2: count per category (fast integer array access)
 	counts := make([]int, numCats)
 	for _, idx := range indices {
 		counts[idx]++
 	}
 
-	// Pre-allocate exact-sized groups
 	groups := make([][]uint32, numCats)
 	for i, count := range counts {
 		groups[i] = make([]uint32, 0, count)
 	}
 
-	// Pass 3: fill groups (fast integer array access, no reallocation)
 	for i, idx := range indices {
 		groups[idx] = append(groups[idx], b.docIDs[i])
 	}
+
+	return categoryList, groups
+}
+
+// addToBitmapsParallel adds doc IDs to bitmaps in parallel.
+func addToBitmapsParallel(bitmaps []*roaring.Bitmap, groups [][]uint32) {
+	var wg sync.WaitGroup
+	for idx, ids := range groups {
+		wg.Add(1)
+		go func(bm *roaring.Bitmap, docIDs []uint32) {
+			defer wg.Done()
+			bm.AddMany(docIDs)
+		}(bitmaps[idx], ids)
+	}
+	wg.Wait()
+}
+
+// Flush commits all accumulated entries to the filter.
+func (b *FilterBatch) Flush() {
+	if len(b.docIDs) == 0 {
+		return
+	}
+
+	categoryList, groups := b.buildCategoryGroups()
+	numCats := len(categoryList)
 
 	b.filter.mu.Lock()
 	defer b.filter.mu.Unlock()
@@ -150,7 +168,6 @@ func (b *FilterBatch) Flush() {
 		b.filter.fields[b.field] = fieldMap
 	}
 
-	// Create bitmaps
 	bitmaps := make([]*roaring.Bitmap, numCats)
 	for idx := range groups {
 		cat := categoryList[idx]
@@ -162,24 +179,14 @@ func (b *FilterBatch) Flush() {
 		bitmaps[idx] = bm
 	}
 
-	// Parallel AddMany if enough categories
 	if numCats >= 4 {
-		var wg sync.WaitGroup
-		for idx, ids := range groups {
-			wg.Add(1)
-			go func(bm *roaring.Bitmap, docIDs []uint32) {
-				defer wg.Done()
-				bm.AddMany(docIDs)
-			}(bitmaps[idx], ids)
-		}
-		wg.Wait()
+		addToBitmapsParallel(bitmaps, groups)
 	} else {
 		for idx, ids := range groups {
 			bitmaps[idx].AddMany(ids)
 		}
 	}
 
-	// Clear for reuse
 	b.docIDs = b.docIDs[:0]
 	b.categories = b.categories[:0]
 }
