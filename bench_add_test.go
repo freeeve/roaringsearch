@@ -45,7 +45,7 @@ func BenchmarkAddMethods(b *testing.B) {
 			}
 			batch.Flush()
 		}
-		b.ReportMetric(float64(numDocs), "docs/op")
+		b.ReportMetric(float64(numDocs), benchMetricDocsOp)
 	})
 }
 
@@ -71,7 +71,7 @@ func BenchmarkAddScaled(b *testing.B) {
 					idx.Add(doc.id, doc.text)
 				}
 			}
-			b.ReportMetric(float64(numDocs), "docs/op")
+			b.ReportMetric(float64(numDocs), benchMetricDocsOp)
 		})
 
 		b.Run(name+"/Batch", func(b *testing.B) {
@@ -83,7 +83,7 @@ func BenchmarkAddScaled(b *testing.B) {
 				}
 				batch.Flush()
 			}
-			b.ReportMetric(float64(numDocs), "docs/op")
+			b.ReportMetric(float64(numDocs), benchMetricDocsOp)
 		})
 	}
 }

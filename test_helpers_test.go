@@ -13,6 +13,7 @@ const (
 	testQuickBrownFox    = "The quick brown fox jumps over the lazy dog"
 	testServerClient     = "server client"
 	testSkip10MBenchmark = "skipping 10M benchmark in short mode"
+	benchMetricDocsOp    = "docs/op"
 )
 
 // Common test error format strings
