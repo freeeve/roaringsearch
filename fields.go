@@ -638,6 +638,23 @@ func (col *SortColumn[T]) sortLocked(docIDs []uint32, asc bool, limit int) []Sor
 	return results
 }
 
+// isBetterValue returns true if newVal should replace topVal in the heap.
+func isBetterValue[T cmp.Ordered](newVal, topVal T, asc bool) bool {
+	if asc {
+		return newVal < topVal
+	}
+	return newVal > topVal
+}
+
+// heapToSortedResults extracts heap items into a sorted slice.
+func heapToSortedResults[T cmp.Ordered](h *resultHeap[T]) []SortedResult[T] {
+	results := make([]SortedResult[T], h.Len())
+	for i := len(results) - 1; i >= 0; i-- {
+		results[i] = heap.Pop(h).(SortedResult[T])
+	}
+	return results
+}
+
 func (col *SortColumn[T]) heapSort(docIDs []uint32, values []T, asc bool, limit int) []SortedResult[T] {
 	h := &resultHeap[T]{
 		items: make([]SortedResult[T], 0, limit),
@@ -649,32 +666,30 @@ func (col *SortColumn[T]) heapSort(docIDs []uint32, values []T, asc bool, limit 
 		if docID < uint32(len(values)) {
 			value = values[docID]
 		}
-
-		if h.Len() < limit {
-			h.items = append(h.items, SortedResult[T]{DocID: docID, Value: value})
-			if h.Len() == limit {
-				heap.Init(h)
-			}
-		} else {
-			top := h.items[0]
-			better := (asc && value < top.Value) || (!asc && value > top.Value)
-			if better {
-				h.items[0] = SortedResult[T]{DocID: docID, Value: value}
-				heap.Fix(h, 0)
-			}
-		}
+		col.heapInsert(h, docID, value, asc, limit)
 	}
 
 	if h.Len() < limit && h.Len() > 0 {
 		heap.Init(h)
 	}
 
-	results := make([]SortedResult[T], h.Len())
-	for i := len(results) - 1; i >= 0; i-- {
-		results[i] = heap.Pop(h).(SortedResult[T])
+	return heapToSortedResults(h)
+}
+
+// heapInsert adds a value to the heap, maintaining the top-k invariant.
+func (col *SortColumn[T]) heapInsert(h *resultHeap[T], docID uint32, value T, asc bool, limit int) {
+	if h.Len() < limit {
+		h.items = append(h.items, SortedResult[T]{DocID: docID, Value: value})
+		if h.Len() == limit {
+			heap.Init(h)
+		}
+		return
 	}
 
-	return results
+	if isBetterValue(value, h.items[0].Value, asc) {
+		h.items[0] = SortedResult[T]{DocID: docID, Value: value}
+		heap.Fix(h, 0)
+	}
 }
 
 // resultHeap implements heap.Interface for SortedResult.
