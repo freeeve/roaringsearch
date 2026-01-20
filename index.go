@@ -526,49 +526,22 @@ func (idx *Index) SearchCallback(query string, cb func(docID uint32) bool) bool 
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
 
-	bitmaps := make([]*roaring.Bitmap, 0, len(runes)-idx.gramSize+1)
-	seen := make(map[uint64]struct{})
-
-	for i := 0; i <= len(runes)-idx.gramSize; i++ {
-		key := runeNgramKey(runes[i : i+idx.gramSize])
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
-		bm, ok := idx.bitmaps[key]
-		if !ok {
-			return true
-		}
-		bitmaps = append(bitmaps, bm)
-	}
-
+	bitmaps := idx.collectQueryBitmaps(runes)
 	if len(bitmaps) == 0 {
 		return true
 	}
 
-	// Sort by cardinality for better performance
 	sort.Slice(bitmaps, func(i, j int) bool {
 		return bitmaps[i].GetCardinality() < bitmaps[j].GetCardinality()
 	})
 
-	// Start with smallest bitmap and check against others
 	smallest := bitmaps[0]
 	rest := bitmaps[1:]
 
 	it := smallest.Iterator()
 	for it.HasNext() {
 		docID := it.Next()
-
-		// Check if docID exists in all other bitmaps
-		found := true
-		for _, bm := range rest {
-			if !bm.Contains(docID) {
-				found = false
-				break
-			}
-		}
-
-		if found {
+		if existsInAllBitmaps(docID, rest) {
 			if !cb(docID) {
 				return false
 			}
