@@ -10,27 +10,32 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
 DURATION="${1:-1h}"
 WORKERS="${2:-4}"
+SEPARATOR="================================================"
 
 copy_corpus_to_testdata() {
     echo ""
-    echo "================================================"
+    echo "$SEPARATOR"
     echo "Copying fuzz corpus to testdata/"
-    echo "================================================"
+    echo "$SEPARATOR"
 
-    local GOCACHE_FUZZ="$(go env GOCACHE)/fuzz/github.com/freeeve/roaringsearch"
-    local TESTDATA_FUZZ="$PROJECT_ROOT/testdata/fuzz"
+    local gocache_fuzz
+    gocache_fuzz="$(go env GOCACHE)/fuzz/github.com/freeeve/roaringsearch"
+    local testdata_fuzz="$PROJECT_ROOT/testdata/fuzz"
 
-    if [ -d "$GOCACHE_FUZZ" ]; then
-        mkdir -p "$TESTDATA_FUZZ"
-        local before_count=$(find "$TESTDATA_FUZZ" -type f 2>/dev/null | wc -l | tr -d ' ')
-        cp -r "$GOCACHE_FUZZ"/* "$TESTDATA_FUZZ"/ 2>/dev/null || true
-        local after_count=$(find "$TESTDATA_FUZZ" -type f | wc -l | tr -d ' ')
+    if [[ -d "$gocache_fuzz" ]]; then
+        mkdir -p "$testdata_fuzz"
+        local before_count
+        before_count=$(find "$testdata_fuzz" -type f 2>/dev/null | wc -l | tr -d ' ')
+        cp -r "$gocache_fuzz"/* "$testdata_fuzz"/ 2>/dev/null || true
+        local after_count
+        after_count=$(find "$testdata_fuzz" -type f | wc -l | tr -d ' ')
         local new_count=$((after_count - before_count))
         echo "Copied corpus from Go cache to testdata/fuzz/"
         echo "New files added: $new_count (total: $after_count)"
     else
-        echo "No fuzz cache found at $GOCACHE_FUZZ"
+        echo "No fuzz cache found at $gocache_fuzz"
     fi
+    return 0
 }
 
 cleanup() {
@@ -51,14 +56,14 @@ FUZZ_TESTS=(
 )
 
 echo "Running ${#FUZZ_TESTS[@]} fuzz tests for $DURATION each with $WORKERS workers"
-echo "================================================"
+echo "$SEPARATOR"
 
 for test in "${FUZZ_TESTS[@]}"; do
     echo ""
     echo ">>> Running $test for $DURATION"
     go test -v -fuzz="$test" -fuzztime="$DURATION" -parallel="$WORKERS"
     status=$?
-    if [ $status -ne 0 ]; then
+    if [[ $status -ne 0 ]]; then
         echo "!!! $test failed"
         exit 1
     fi
@@ -66,7 +71,7 @@ for test in "${FUZZ_TESTS[@]}"; do
 done
 
 echo ""
-echo "================================================"
+echo "$SEPARATOR"
 echo "All fuzz tests passed"
 
 copy_corpus_to_testdata
