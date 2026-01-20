@@ -4,7 +4,7 @@ go 1.25
 
 require (
 	github.com/RoaringBitmap/roaring v1.9.4
-	github.com/freeeve/msgpck v0.1.3
+	github.com/freeeve/msgpck v0.1.4
 )
 
 require (
