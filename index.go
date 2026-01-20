@@ -660,20 +660,9 @@ func (idx *Index) SearchAnyCount(query string) uint64 {
 	return result.GetCardinality()
 }
 
-// SearchThreshold returns documents containing at least threshold n-grams of the query.
-// Results include scores indicating how many n-grams matched for each document.
-func (idx *Index) SearchThreshold(query string, threshold int) SearchResult {
-	normalized := idx.normalizer(query)
-	runes := []rune(normalized)
-
-	if len(runes) < idx.gramSize || threshold <= 0 {
-		return SearchResult{}
-	}
-
-	idx.mu.RLock()
-	defer idx.mu.RUnlock()
-
-	// Collect unique bitmaps
+// collectExistingQueryBitmaps collects bitmaps for query n-grams that exist in the index.
+// Unlike collectQueryBitmaps, this doesn't return nil on missing n-grams.
+func (idx *Index) collectExistingQueryBitmaps(runes []rune) []*roaring.Bitmap {
 	bitmaps := make([]*roaring.Bitmap, 0, len(runes)-idx.gramSize+1)
 	seen := make(map[uint64]struct{})
 
@@ -687,17 +676,11 @@ func (idx *Index) SearchThreshold(query string, threshold int) SearchResult {
 			bitmaps = append(bitmaps, bm)
 		}
 	}
+	return bitmaps
+}
 
-	if len(bitmaps) == 0 {
-		return SearchResult{}
-	}
-
-	// Clamp threshold
-	if threshold > len(bitmaps) {
-		threshold = len(bitmaps)
-	}
-
-	// Count matches per document
+// countBitmapMatches counts how many bitmaps each document appears in.
+func countBitmapMatches(bitmaps []*roaring.Bitmap) map[uint32]int {
 	counts := make(map[uint32]int)
 	for _, bm := range bitmaps {
 		it := bm.Iterator()
@@ -705,8 +688,33 @@ func (idx *Index) SearchThreshold(query string, threshold int) SearchResult {
 			counts[it.Next()]++
 		}
 	}
+	return counts
+}
 
-	// Filter by threshold and collect results
+// SearchThreshold returns documents containing at least threshold n-grams of the query.
+// Results include scores indicating how many n-grams matched for each document.
+func (idx *Index) SearchThreshold(query string, threshold int) SearchResult {
+	normalized := idx.normalizer(query)
+	runes := []rune(normalized)
+
+	if len(runes) < idx.gramSize || threshold <= 0 {
+		return SearchResult{}
+	}
+
+	idx.mu.RLock()
+	defer idx.mu.RUnlock()
+
+	bitmaps := idx.collectExistingQueryBitmaps(runes)
+	if len(bitmaps) == 0 {
+		return SearchResult{}
+	}
+
+	if threshold > len(bitmaps) {
+		threshold = len(bitmaps)
+	}
+
+	counts := countBitmapMatches(bitmaps)
+
 	var docIDs []uint32
 	scores := make(map[uint32]int)
 
@@ -717,7 +725,6 @@ func (idx *Index) SearchThreshold(query string, threshold int) SearchResult {
 		}
 	}
 
-	// Sort by score (descending), then by docID (ascending)
 	sort.Slice(docIDs, func(i, j int) bool {
 		if scores[docIDs[i]] != scores[docIDs[j]] {
 			return scores[docIDs[i]] > scores[docIDs[j]]
