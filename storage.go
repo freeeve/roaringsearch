@@ -96,98 +96,108 @@ func (idx *Index) WriteTo(w io.Writer) (int64, error) {
 	return written, nil
 }
 
+// readHeader reads and validates the file header, returning gram size.
+func readHeader(r io.Reader) (gramSize int, read int64, err error) {
+	header := make([]byte, 8)
+	n, err := io.ReadFull(r, header)
+	read = int64(n)
+	if err != nil {
+		return 0, read, fmt.Errorf("read header: %w", err)
+	}
+
+	if string(header[0:4]) != magicBytes {
+		return 0, read, ErrInvalidMagic
+	}
+
+	fileVersion := binary.LittleEndian.Uint16(header[4:6])
+	if fileVersion != version {
+		return 0, read, ErrInvalidVersion
+	}
+
+	gramSize = int(binary.LittleEndian.Uint16(header[6:8]))
+	if gramSize < 1 || gramSize > maxGramSize {
+		return 0, read, ErrInvalidGramSize
+	}
+
+	return gramSize, read, nil
+}
+
+// readNgramEntry reads a single n-gram key and bitmap from the reader.
+func readNgramEntry(r io.Reader, keyBuf, sizeBuf []byte) (key uint64, bm *roaring.Bitmap, read int64, err error) {
+	n, err := io.ReadFull(r, keyBuf)
+	read += int64(n)
+	if err != nil {
+		return 0, nil, read, fmt.Errorf("read ngram key: %w", err)
+	}
+	key = binary.LittleEndian.Uint64(keyBuf)
+
+	n, err = io.ReadFull(r, sizeBuf)
+	read += int64(n)
+	if err != nil {
+		return 0, nil, read, fmt.Errorf("read bitmap size: %w", err)
+	}
+	bmSize := binary.LittleEndian.Uint32(sizeBuf)
+	if bmSize > maxBitmapSize {
+		return 0, nil, read, ErrInvalidSize
+	}
+
+	bmBytes := make([]byte, bmSize)
+	n, err = io.ReadFull(r, bmBytes)
+	read += int64(n)
+	if err != nil {
+		return 0, nil, read, fmt.Errorf("read bitmap: %w", err)
+	}
+
+	bm = roaring.New()
+	_, err = bm.ReadFrom(bytes.NewReader(bmBytes))
+	if err != nil {
+		return 0, nil, read, fmt.Errorf("deserialize bitmap: %w", err)
+	}
+
+	return key, bm, read, nil
+}
+
 // ReadFrom reads the index from the provided reader.
 // Note: This replaces the current index contents. The normalizer is preserved.
 func (idx *Index) ReadFrom(r io.Reader) (int64, error) {
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
 
-	var read int64
+	var totalRead int64
 
-	// Read header
-	header := make([]byte, 8)
-	n, err := io.ReadFull(r, header)
-	read += int64(n)
+	gramSize, read, err := readHeader(r)
+	totalRead += read
 	if err != nil {
-		return read, fmt.Errorf("read header: %w", err)
-	}
-
-	// Verify magic
-	if string(header[0:4]) != magicBytes {
-		return read, ErrInvalidMagic
-	}
-
-	// Check version
-	fileVersion := binary.LittleEndian.Uint16(header[4:6])
-	if fileVersion != version {
-		return read, ErrInvalidVersion
-	}
-
-	// Read gram size
-	gramSize := int(binary.LittleEndian.Uint16(header[6:8]))
-	if gramSize < 1 || gramSize > maxGramSize {
-		return read, ErrInvalidGramSize
+		return totalRead, err
 	}
 	idx.gramSize = gramSize
 
-	// Read n-gram count
 	countBuf := make([]byte, 4)
-	n, err = io.ReadFull(r, countBuf)
-	read += int64(n)
+	n, err := io.ReadFull(r, countBuf)
+	totalRead += int64(n)
 	if err != nil {
-		return read, fmt.Errorf("read ngram count: %w", err)
+		return totalRead, fmt.Errorf("read ngram count: %w", err)
 	}
 	ngramCount := binary.LittleEndian.Uint32(countBuf)
 	if ngramCount > maxNgramCount {
-		return read, ErrInvalidCount
+		return totalRead, ErrInvalidCount
 	}
 
-	// Clear and reinitialize bitmaps
 	idx.bitmaps = make(map[uint64]*roaring.Bitmap, ngramCount)
 
-	// Read each n-gram and its bitmap
 	keyBuf := make([]byte, 8)
 	sizeBuf := make([]byte, 4)
 
 	for i := uint32(0); i < ngramCount; i++ {
-		// Read n-gram key
-		n, err = io.ReadFull(r, keyBuf)
-		read += int64(n)
+		key, bm, read, err := readNgramEntry(r, keyBuf, sizeBuf)
+		totalRead += read
 		if err != nil {
-			return read, fmt.Errorf("read ngram key: %w", err)
+			return totalRead, err
 		}
-		key := binary.LittleEndian.Uint64(keyBuf)
-
-		// Read bitmap size
-		n, err = io.ReadFull(r, sizeBuf)
-		read += int64(n)
-		if err != nil {
-			return read, fmt.Errorf("read bitmap size: %w", err)
-		}
-		bmSize := binary.LittleEndian.Uint32(sizeBuf)
-		if bmSize > maxBitmapSize {
-			return read, ErrInvalidSize
-		}
-
-		// Read bitmap data
-		bmBytes := make([]byte, bmSize)
-		n, err = io.ReadFull(r, bmBytes)
-		read += int64(n)
-		if err != nil {
-			return read, fmt.Errorf("read bitmap: %w", err)
-		}
-
-		// Deserialize bitmap
-		bm := roaring.New()
-		_, err = bm.ReadFrom(bytes.NewReader(bmBytes))
-		if err != nil {
-			return read, fmt.Errorf("deserialize bitmap: %w", err)
-		}
-
 		idx.bitmaps[key] = bm
 	}
 
-	return read, nil
+	return totalRead, nil
 }
 
 // SaveToFile saves the index to a file atomically.
