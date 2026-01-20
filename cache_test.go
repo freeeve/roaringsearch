@@ -11,21 +11,21 @@ import (
 func TestCachedIndexBasic(t *testing.T) {
 	// Create and save an index
 	idx := NewIndex(3)
-	idx.Add(1, "hello world")
-	idx.Add(2, "hello there")
+	idx.Add(1, testHelloWorld)
+	idx.Add(2, testHelloThere)
 	idx.Add(3, "world peace")
 
 	tmpDir := t.TempDir()
 	path := filepath.Join(tmpDir, "cached.sear")
 
 	if err := idx.SaveToFile(path); err != nil {
-		t.Fatalf("SaveToFile failed: %v", err)
+		t.Fatalf(errSaveToFile, err)
 	}
 
 	// Open as cached index
 	cached, err := OpenCachedIndex(path, WithCacheSize(10))
 	if err != nil {
-		t.Fatalf("OpenCachedIndex failed: %v", err)
+		t.Fatalf(errOpenCachedIndex, err)
 	}
 
 	// Verify metadata
@@ -66,13 +66,13 @@ func TestCachedIndexLRUEviction(t *testing.T) {
 	path := filepath.Join(tmpDir, "lru.sear")
 
 	if err := idx.SaveToFile(path); err != nil {
-		t.Fatalf("SaveToFile failed: %v", err)
+		t.Fatalf(errSaveToFile, err)
 	}
 
 	// Open with small cache
 	cached, err := OpenCachedIndex(path, WithCacheSize(5))
 	if err != nil {
-		t.Fatalf("OpenCachedIndex failed: %v", err)
+		t.Fatalf(errOpenCachedIndex, err)
 	}
 
 	// Search for different terms to fill cache
@@ -98,12 +98,12 @@ func TestCachedIndexSearchAny(t *testing.T) {
 	path := filepath.Join(tmpDir, "any.sear")
 
 	if err := idx.SaveToFile(path); err != nil {
-		t.Fatalf("SaveToFile failed: %v", err)
+		t.Fatalf(errSaveToFile, err)
 	}
 
 	cached, err := OpenCachedIndex(path)
 	if err != nil {
-		t.Fatalf("OpenCachedIndex failed: %v", err)
+		t.Fatalf(errOpenCachedIndex, err)
 	}
 
 	results := cached.SearchAny("app")
@@ -114,19 +114,19 @@ func TestCachedIndexSearchAny(t *testing.T) {
 
 func TestCachedIndexSearchThreshold(t *testing.T) {
 	idx := NewIndex(3)
-	idx.Add(1, "hello world")
-	idx.Add(2, "hello there")
+	idx.Add(1, testHelloWorld)
+	idx.Add(2, testHelloThere)
 
 	tmpDir := t.TempDir()
 	path := filepath.Join(tmpDir, "threshold.sear")
 
 	if err := idx.SaveToFile(path); err != nil {
-		t.Fatalf("SaveToFile failed: %v", err)
+		t.Fatalf(errSaveToFile, err)
 	}
 
 	cached, err := OpenCachedIndex(path)
 	if err != nil {
-		t.Fatalf("OpenCachedIndex failed: %v", err)
+		t.Fatalf(errOpenCachedIndex, err)
 	}
 
 	result := cached.SearchThreshold("hello", 2)
@@ -137,7 +137,7 @@ func TestCachedIndexSearchThreshold(t *testing.T) {
 
 func TestCachedIndexMoveToFront(t *testing.T) {
 	idx := NewIndex(3)
-	idx.Add(1, "hello world")
+	idx.Add(1, testHelloWorld)
 	idx.Add(2, "foo bar baz")
 	idx.Add(3, "test data here")
 
@@ -145,12 +145,12 @@ func TestCachedIndexMoveToFront(t *testing.T) {
 	path := filepath.Join(tmpDir, "lru_move.sear")
 
 	if err := idx.SaveToFile(path); err != nil {
-		t.Fatalf("SaveToFile failed: %v", err)
+		t.Fatalf(errSaveToFile, err)
 	}
 
 	cached, err := OpenCachedIndex(path, WithCacheSize(100))
 	if err != nil {
-		t.Fatalf("OpenCachedIndex failed: %v", err)
+		t.Fatalf(errOpenCachedIndex, err)
 	}
 
 	// Search for different terms to populate cache
@@ -170,18 +170,18 @@ func TestCachedIndexMoveToFront(t *testing.T) {
 
 func TestCachedIndexClearCache(t *testing.T) {
 	idx := NewIndex(3)
-	idx.Add(1, "hello world")
+	idx.Add(1, testHelloWorld)
 
 	tmpDir := t.TempDir()
 	path := filepath.Join(tmpDir, "clear.sear")
 
 	if err := idx.SaveToFile(path); err != nil {
-		t.Fatalf("SaveToFile failed: %v", err)
+		t.Fatalf(errSaveToFile, err)
 	}
 
 	cached, err := OpenCachedIndex(path)
 	if err != nil {
-		t.Fatalf("OpenCachedIndex failed: %v", err)
+		t.Fatalf(errOpenCachedIndex, err)
 	}
 
 	// Populate cache
@@ -205,18 +205,18 @@ func TestCachedIndexClearCache(t *testing.T) {
 
 func TestCachedIndexPreload(t *testing.T) {
 	idx := NewIndex(3)
-	idx.Add(1, "hello world")
+	idx.Add(1, testHelloWorld)
 
 	tmpDir := t.TempDir()
 	path := filepath.Join(tmpDir, "preload.sear")
 
 	if err := idx.SaveToFile(path); err != nil {
-		t.Fatalf("SaveToFile failed: %v", err)
+		t.Fatalf(errSaveToFile, err)
 	}
 
 	cached, err := OpenCachedIndex(path)
 	if err != nil {
-		t.Fatalf("OpenCachedIndex failed: %v", err)
+		t.Fatalf(errOpenCachedIndex, err)
 	}
 
 	// Preload by searching (populates cache)
@@ -236,13 +236,13 @@ func TestWithCachedNormalizer(t *testing.T) {
 	path := filepath.Join(tmpDir, "normalizer.sear")
 
 	if err := idx.SaveToFile(path); err != nil {
-		t.Fatalf("SaveToFile failed: %v", err)
+		t.Fatalf(errSaveToFile, err)
 	}
 
 	// Open with custom normalizer
 	cached, err := OpenCachedIndex(path, WithCachedNormalizer(NormalizeLowercase))
 	if err != nil {
-		t.Fatalf("OpenCachedIndex failed: %v", err)
+		t.Fatalf(errOpenCachedIndex, err)
 	}
 
 	// Search should work with normalizer
@@ -254,19 +254,19 @@ func TestWithCachedNormalizer(t *testing.T) {
 
 func TestPreloadKeys(t *testing.T) {
 	idx := NewIndex(3)
-	idx.Add(1, "hello world")
-	idx.Add(2, "hello there")
+	idx.Add(1, testHelloWorld)
+	idx.Add(2, testHelloThere)
 
 	tmpDir := t.TempDir()
 	path := filepath.Join(tmpDir, "preloadkeys.sear")
 
 	if err := idx.SaveToFile(path); err != nil {
-		t.Fatalf("SaveToFile failed: %v", err)
+		t.Fatalf(errSaveToFile, err)
 	}
 
 	cached, err := OpenCachedIndex(path, WithCacheSize(100))
 	if err != nil {
-		t.Fatalf("OpenCachedIndex failed: %v", err)
+		t.Fatalf(errOpenCachedIndex, err)
 	}
 
 	// Get some valid keys from the index
@@ -296,7 +296,7 @@ func TestPreloadKeys(t *testing.T) {
 
 func TestHasNgram(t *testing.T) {
 	idx := NewIndex(3)
-	idx.Add(1, "hello world")
+	idx.Add(1, testHelloWorld)
 
 	tmpDir := t.TempDir()
 	path := filepath.Join(tmpDir, "test.sear")
@@ -318,19 +318,19 @@ func TestHasNgram(t *testing.T) {
 
 func TestCachedIndexSearchEdgeCases(t *testing.T) {
 	idx := NewIndex(3)
-	idx.Add(1, "hello world")
-	idx.Add(2, "hello there")
+	idx.Add(1, testHelloWorld)
+	idx.Add(2, testHelloThere)
 
 	tmpDir := t.TempDir()
 	path := filepath.Join(tmpDir, "edge.sear")
 
 	if err := idx.SaveToFile(path); err != nil {
-		t.Fatalf("SaveToFile failed: %v", err)
+		t.Fatalf(errSaveToFile, err)
 	}
 
 	cached, err := OpenCachedIndex(path)
 	if err != nil {
-		t.Fatalf("OpenCachedIndex failed: %v", err)
+		t.Fatalf(errOpenCachedIndex, err)
 	}
 
 	// Short query
@@ -386,13 +386,13 @@ func TestCachedIndexEviction(t *testing.T) {
 	path := filepath.Join(tmpDir, "evict.sear")
 
 	if err := idx.SaveToFile(path); err != nil {
-		t.Fatalf("SaveToFile failed: %v", err)
+		t.Fatalf(errSaveToFile, err)
 	}
 
 	// Small cache to force eviction
 	cached, err := OpenCachedIndex(path, WithCacheSize(3))
 	if err != nil {
-		t.Fatalf("OpenCachedIndex failed: %v", err)
+		t.Fatalf(errOpenCachedIndex, err)
 	}
 
 	// Search multiple times to fill and evict cache
@@ -411,7 +411,7 @@ func TestCachedIndexEviction(t *testing.T) {
 
 func TestCachedIndexSingleEntryEviction(t *testing.T) {
 	idx := NewIndex(3)
-	idx.Add(1, "hello world")
+	idx.Add(1, testHelloWorld)
 	idx.Add(2, "foo bar baz")
 
 	tmpDir := t.TempDir()
@@ -442,7 +442,7 @@ func TestWithMemoryBudget(t *testing.T) {
 	idx := NewIndex(3)
 	// Add docs with varying content to create different sized bitmaps
 	for i := 1; i <= 100; i++ {
-		idx.Add(uint32(i), "hello world test data for memory budget")
+		idx.Add(uint32(i), "testHelloWorld test data for memory budget")
 	}
 
 	tmpDir := t.TempDir()
@@ -452,7 +452,7 @@ func TestWithMemoryBudget(t *testing.T) {
 	// Open with 1KB memory budget
 	cached, err := OpenCachedIndex(path, WithMemoryBudget(1024))
 	if err != nil {
-		t.Fatalf("OpenCachedIndex failed: %v", err)
+		t.Fatalf(errOpenCachedIndex, err)
 	}
 
 	// Initial memory should be 0
@@ -507,14 +507,14 @@ func TestMemoryBudgetRespected(t *testing.T) {
 	tmpDir := t.TempDir()
 	path := filepath.Join(tmpDir, "budget_test.sear")
 	if err := idx.SaveToFile(path); err != nil {
-		t.Fatalf("SaveToFile failed: %v", err)
+		t.Fatalf(errSaveToFile, err)
 	}
 
 	// Set a small memory budget (10KB)
 	memoryBudget := int64(10 * 1024)
 	cached, err := OpenCachedIndex(path, WithMemoryBudget(memoryBudget))
 	if err != nil {
-		t.Fatalf("OpenCachedIndex failed: %v", err)
+		t.Fatalf(errOpenCachedIndex, err)
 	}
 
 	// Track max memory seen
@@ -574,14 +574,14 @@ func TestMemoryBudgetWithLargeBitmaps(t *testing.T) {
 	tmpDir := t.TempDir()
 	path := filepath.Join(tmpDir, "large_budget_test.sear")
 	if err := idx.SaveToFile(path); err != nil {
-		t.Fatalf("SaveToFile failed: %v", err)
+		t.Fatalf(errSaveToFile, err)
 	}
 
 	// 50KB budget - should force frequent eviction
 	memoryBudget := int64(50 * 1024)
 	cached, err := OpenCachedIndex(path, WithMemoryBudget(memoryBudget))
 	if err != nil {
-		t.Fatalf("OpenCachedIndex failed: %v", err)
+		t.Fatalf(errOpenCachedIndex, err)
 	}
 
 	t.Logf("Index has %d ngrams", cached.NgramCount())
@@ -624,14 +624,14 @@ func TestMemoryBudgetLargeBitmaps(t *testing.T) {
 	tmpDir := t.TempDir()
 	path := filepath.Join(tmpDir, "large_bitmaps.sear")
 	if err := idx.SaveToFile(path); err != nil {
-		t.Fatalf("SaveToFile failed: %v", err)
+		t.Fatalf(errSaveToFile, err)
 	}
 
 	// 1MB budget
 	memoryBudget := int64(1024 * 1024)
 	cached, err := OpenCachedIndex(path, WithMemoryBudget(memoryBudget))
 	if err != nil {
-		t.Fatalf("OpenCachedIndex failed: %v", err)
+		t.Fatalf(errOpenCachedIndex, err)
 	}
 
 	t.Logf("Index has %d ngrams", cached.NgramCount())
@@ -677,14 +677,14 @@ func TestMemoryBudgetManyUniqueQueries(t *testing.T) {
 	tmpDir := t.TempDir()
 	path := filepath.Join(tmpDir, "many_queries.sear")
 	if err := idx.SaveToFile(path); err != nil {
-		t.Fatalf("SaveToFile failed: %v", err)
+		t.Fatalf(errSaveToFile, err)
 	}
 
 	// Small budget to force eviction: 100KB
 	memoryBudget := int64(100 * 1024)
 	cached, err := OpenCachedIndex(path, WithMemoryBudget(memoryBudget))
 	if err != nil {
-		t.Fatalf("OpenCachedIndex failed: %v", err)
+		t.Fatalf(errOpenCachedIndex, err)
 	}
 
 	totalNgrams := cached.NgramCount()
@@ -740,14 +740,14 @@ func TestMemoryBudgetOversizedBitmap(t *testing.T) {
 	tmpDir := t.TempDir()
 	path := filepath.Join(tmpDir, "oversized.sear")
 	if err := idx.SaveToFile(path); err != nil {
-		t.Fatalf("SaveToFile failed: %v", err)
+		t.Fatalf(errSaveToFile, err)
 	}
 
 	// Very small budget - likely smaller than the "common" bitmap
 	memoryBudget := int64(1024) // 1KB
 	cached, err := OpenCachedIndex(path, WithMemoryBudget(memoryBudget))
 	if err != nil {
-		t.Fatalf("OpenCachedIndex failed: %v", err)
+		t.Fatalf(errOpenCachedIndex, err)
 	}
 
 	t.Logf("Index has %d ngrams, budget %d bytes", cached.NgramCount(), memoryBudget)
@@ -779,7 +779,7 @@ func TestMemoryBudgetOversizedBitmap(t *testing.T) {
 
 func TestCachedIndexSearchAnyPartialMatch(t *testing.T) {
 	idx := NewIndex(3)
-	idx.Add(1, "hello world")
+	idx.Add(1, testHelloWorld)
 	idx.Add(2, "goodbye world")
 
 	tmpDir := t.TempDir()

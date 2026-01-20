@@ -5,6 +5,23 @@ import (
 	"strings"
 )
 
+// Common test strings to avoid duplication
+const (
+	testHelloWorld       = "hello world"
+	testHelloThere       = "hello there"
+	testGoodbyeWorld     = "goodbye world"
+	testQuickBrownFox    = "The quick brown fox jumps over the lazy dog"
+	testServerClient     = "server client"
+	testSkip10MBenchmark = "skipping 10M benchmark in short mode"
+)
+
+// Common test error format strings
+const (
+	errSaveToFile       = "SaveToFile failed: %v"
+	errOpenCachedIndex  = "OpenCachedIndex failed: %v"
+	errEmptyQueryResult = "empty query should return nil, got %v"
+)
+
 // Word pools for generating realistic documents
 var (
 	commonWords = []string{
