@@ -56,7 +56,7 @@ echo "================================================"
 for test in "${FUZZ_TESTS[@]}"; do
     echo ""
     echo ">>> Running $test for $DURATION"
-    go test -fuzz="$test" -fuzztime="$DURATION" -parallel="$WORKERS"
+    go test -v -fuzz="$test" -fuzztime="$DURATION" -parallel="$WORKERS"
     status=$?
     if [ $status -ne 0 ]; then
         echo "!!! $test failed"
