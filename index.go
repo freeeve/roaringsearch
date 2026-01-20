@@ -62,31 +62,18 @@ func (idx *Index) NgramCount() int {
 	return len(idx.bitmaps)
 }
 
-// Add indexes a document with the given ID and text.
-// Uses fast ASCII path when possible, falls back to rune-based for Unicode.
-func (idx *Index) Add(docID uint32, text string) {
-	idx.mu.Lock()
-	defer idx.mu.Unlock()
-
-	// Try fast ASCII path (combines normalization and key generation)
-	// Only used with default normalizer
-	if idx.useASCIFastPath {
-		keys := make([]uint64, 0, 64)
-		keys, ok := normalizeAndKeyASCII(text, idx.gramSize, keys)
-		if ok {
-			for _, key := range keys {
-				bm, exists := idx.bitmaps[key]
-				if !exists {
-					bm = roaring.New()
-					idx.bitmaps[key] = bm
-				}
-				bm.Add(docID)
-			}
-			return
-		}
+// getOrCreateBitmap returns the bitmap for the key, creating it if needed.
+func (idx *Index) getOrCreateBitmap(key uint64) *roaring.Bitmap {
+	bm, exists := idx.bitmaps[key]
+	if !exists {
+		bm = roaring.New()
+		idx.bitmaps[key] = bm
 	}
+	return bm
+}
 
-	// Fallback: rune-based processing for Unicode text or custom normalizer
+// addRuneBasedNgrams indexes a document using rune-based n-gram processing.
+func (idx *Index) addRuneBasedNgrams(docID uint32, text string) {
 	normalized := idx.normalizer(text)
 	runes := []rune(normalized)
 
@@ -94,32 +81,38 @@ func (idx *Index) Add(docID uint32, text string) {
 		return
 	}
 
-	// Use slice for deduplication - faster than map for typical doc sizes
 	seen := make([]uint64, 0, len(runes)-idx.gramSize+1)
 
 	for i := 0; i <= len(runes)-idx.gramSize; i++ {
 		key := runeNgramKey(runes[i : i+idx.gramSize])
 
-		// Linear scan for duplicates (fast for small N)
-		found := false
-		for _, k := range seen {
-			if k == key {
-				found = true
-				break
-			}
-		}
-		if found {
+		if containsKey(seen, key) {
 			continue
 		}
 		seen = append(seen, key)
 
-		bm, exists := idx.bitmaps[key]
-		if !exists {
-			bm = roaring.New()
-			idx.bitmaps[key] = bm
-		}
-		bm.Add(docID)
+		idx.getOrCreateBitmap(key).Add(docID)
 	}
+}
+
+// Add indexes a document with the given ID and text.
+// Uses fast ASCII path when possible, falls back to rune-based for Unicode.
+func (idx *Index) Add(docID uint32, text string) {
+	idx.mu.Lock()
+	defer idx.mu.Unlock()
+
+	if idx.useASCIFastPath {
+		keys := make([]uint64, 0, 64)
+		keys, ok := normalizeAndKeyASCII(text, idx.gramSize, keys)
+		if ok {
+			for _, key := range keys {
+				idx.getOrCreateBitmap(key).Add(docID)
+			}
+			return
+		}
+	}
+
+	idx.addRuneBasedNgrams(docID, text)
 }
 
 // addBatch indexes multiple documents efficiently using parallel processing.
