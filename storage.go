@@ -17,8 +17,17 @@ const (
 )
 
 var (
-	ErrInvalidMagic   = errors.New("invalid magic bytes")
-	ErrInvalidVersion = errors.New("unsupported version")
+	ErrInvalidMagic    = errors.New("invalid magic bytes")
+	ErrInvalidVersion  = errors.New("unsupported version")
+	ErrInvalidGramSize = errors.New("invalid gram size")
+	ErrInvalidCount    = errors.New("invalid count exceeds limit")
+	ErrInvalidSize     = errors.New("invalid size exceeds limit")
+)
+
+const (
+	maxGramSize   = 8         // reasonable upper limit for n-gram size
+	maxNgramCount = 100000000 // 100M ngrams max
+	maxBitmapSize = 100 << 20 // 100MB per bitmap max
 )
 
 // WriteTo writes the index to the provided writer.
@@ -115,7 +124,11 @@ func (idx *Index) ReadFrom(r io.Reader) (int64, error) {
 	}
 
 	// Read gram size
-	idx.gramSize = int(binary.LittleEndian.Uint16(header[6:8]))
+	gramSize := int(binary.LittleEndian.Uint16(header[6:8]))
+	if gramSize < 1 || gramSize > maxGramSize {
+		return read, ErrInvalidGramSize
+	}
+	idx.gramSize = gramSize
 
 	// Read n-gram count
 	countBuf := make([]byte, 4)
@@ -125,6 +138,9 @@ func (idx *Index) ReadFrom(r io.Reader) (int64, error) {
 		return read, fmt.Errorf("read ngram count: %w", err)
 	}
 	ngramCount := binary.LittleEndian.Uint32(countBuf)
+	if ngramCount > maxNgramCount {
+		return read, ErrInvalidCount
+	}
 
 	// Clear and reinitialize bitmaps
 	idx.bitmaps = make(map[uint64]*roaring.Bitmap, ngramCount)
@@ -149,6 +165,9 @@ func (idx *Index) ReadFrom(r io.Reader) (int64, error) {
 			return read, fmt.Errorf("read bitmap size: %w", err)
 		}
 		bmSize := binary.LittleEndian.Uint32(sizeBuf)
+		if bmSize > maxBitmapSize {
+			return read, ErrInvalidSize
+		}
 
 		// Read bitmap data
 		bmBytes := make([]byte, bmSize)

@@ -11,7 +11,7 @@ import (
 	"unsafe"
 
 	"github.com/RoaringBitmap/roaring"
-	"github.com/vmihailenco/msgpack/v5"
+	"github.com/freeeve/msgpck"
 )
 
 // BitmapFilter provides fast filtering by multiple category fields using bitmap indexes.
@@ -349,18 +349,23 @@ func (c *BitmapFilter) Encode(w io.Writer) error {
 	for field, fieldMap := range c.fields {
 		data.Fields[field] = make(map[string][]byte, len(fieldMap))
 		for cat, bm := range fieldMap {
-			bytes, err := bm.ToBytes()
+			bmBytes, err := bm.ToBytes()
 			if err != nil {
 				c.mu.RUnlock()
 				return err
 			}
-			data.Fields[field][cat] = bytes
+			data.Fields[field][cat] = bmBytes
 		}
 	}
 	c.mu.RUnlock()
 
 	// Write without holding lock - safe for concurrent reads/writes
-	return msgpack.NewEncoder(w).Encode(data)
+	encoded, err := msgpck.Marshal(data)
+	if err != nil {
+		return err
+	}
+	_, err = w.Write(encoded)
+	return err
 }
 
 // LoadBitmapFilter loads a bitmap filter from a file.
@@ -375,20 +380,25 @@ func LoadBitmapFilter(path string) (*BitmapFilter, error) {
 
 // ReadBitmapFilter reads a bitmap filter from a reader.
 func ReadBitmapFilter(r io.Reader) (*BitmapFilter, error) {
-	var data bitmapFilterData
-	if err := msgpack.NewDecoder(r).Decode(&data); err != nil {
+	data, err := io.ReadAll(r)
+	if err != nil {
+		return nil, err
+	}
+
+	var decoded bitmapFilterData
+	if err := msgpck.UnmarshalStruct(data, &decoded); err != nil {
 		return nil, err
 	}
 
 	c := &BitmapFilter{
-		fields: make(map[string]map[string]*roaring.Bitmap, len(data.Fields)),
+		fields: make(map[string]map[string]*roaring.Bitmap, len(decoded.Fields)),
 	}
 
-	for field, fieldMap := range data.Fields {
+	for field, fieldMap := range decoded.Fields {
 		c.fields[field] = make(map[string]*roaring.Bitmap, len(fieldMap))
-		for cat, bytes := range fieldMap {
+		for cat, bmBytes := range fieldMap {
 			bm := roaring.New()
-			if err := bm.UnmarshalBinary(bytes); err != nil {
+			if err := bm.UnmarshalBinary(bmBytes); err != nil {
 				return nil, err
 			}
 			c.fields[field][cat] = bm
@@ -746,7 +756,12 @@ func (col *SortColumn[T]) Encode(w io.Writer) error {
 		MaxDocID: maxDocID,
 	}
 
-	return msgpack.NewEncoder(w).Encode(data)
+	encoded, err := msgpck.Marshal(data)
+	if err != nil {
+		return err
+	}
+	_, err = w.Write(encoded)
+	return err
 }
 
 // LoadSortColumn loads a sort column from a file.
@@ -761,8 +776,13 @@ func LoadSortColumn[T cmp.Ordered](path string) (*SortColumn[T], error) {
 
 // ReadSortColumn reads a sort column from a reader.
 func ReadSortColumn[T cmp.Ordered](r io.Reader) (*SortColumn[T], error) {
+	bytes, err := io.ReadAll(r)
+	if err != nil {
+		return nil, err
+	}
+
 	var data sortColumnData[T]
-	if err := msgpack.NewDecoder(r).Decode(&data); err != nil {
+	if err := msgpck.UnmarshalStruct(bytes, &data); err != nil {
 		return nil, err
 	}
 
