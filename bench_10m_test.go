@@ -55,7 +55,10 @@ func getOrCreate10MIndexFile(b *testing.B) string {
 	b.Helper()
 	idx := getOrCreate10MIndex(b)
 
-	tmpDir := os.TempDir()
+	tmpDir, err := os.MkdirTemp("", "roaringsearch-bench-*")
+	if err != nil {
+		b.Fatalf("Failed to create temp dir: %v", err)
+	}
 	path := filepath.Join(tmpDir, "bench_10m.sear")
 
 	b.Logf("Saving index to %s...", path)
