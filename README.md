@@ -9,6 +9,7 @@
 [![Maintainability Rating](https://sonarcloud.io/api/project_badges/measure?project=freeeve_roaringsearch&metric=sqale_rating)](https://sonarcloud.io/summary/new_code?id=freeeve_roaringsearch)
 [![Reliability Rating](https://sonarcloud.io/api/project_badges/measure?project=freeeve_roaringsearch&metric=reliability_rating)](https://sonarcloud.io/summary/new_code?id=freeeve_roaringsearch)
 [![Security Rating](https://sonarcloud.io/api/project_badges/measure?project=freeeve_roaringsearch&metric=security_rating)](https://sonarcloud.io/summary/new_code?id=freeeve_roaringsearch)
+[![Snyk](https://snyk.io/test/github/freeeve/roaringsearch/badge.svg)](https://snyk.io/test/github/freeeve/roaringsearch)
 
 A high-performance n-gram text search library using roaring bitmaps for Go.
 
