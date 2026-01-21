@@ -5,6 +5,11 @@
 [![Go Report Card](https://goreportcard.com/badge/github.com/freeeve/roaringsearch)](https://goreportcard.com/report/github.com/freeeve/roaringsearch)
 [![Go Reference](https://pkg.go.dev/badge/github.com/freeeve/roaringsearch.svg)](https://pkg.go.dev/github.com/freeeve/roaringsearch)
 
+[![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=freeeve_roaringsearch&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=freeeve_roaringsearch)
+[![Maintainability Rating](https://sonarcloud.io/api/project_badges/measure?project=freeeve_roaringsearch&metric=sqale_rating)](https://sonarcloud.io/summary/new_code?id=freeeve_roaringsearch)
+[![Reliability Rating](https://sonarcloud.io/api/project_badges/measure?project=freeeve_roaringsearch&metric=reliability_rating)](https://sonarcloud.io/summary/new_code?id=freeeve_roaringsearch)
+[![Security Rating](https://sonarcloud.io/api/project_badges/measure?project=freeeve_roaringsearch&metric=security_rating)](https://sonarcloud.io/summary/new_code?id=freeeve_roaringsearch)
+
 A high-performance n-gram text search library using roaring bitmaps for Go.
 
 Designed to run on memory-constrained environments like AWS t4g.micro (1GB RAM) while still supporting large indexes via disk-backed caching with configurable memory budgets.
