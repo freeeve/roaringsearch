@@ -370,7 +370,8 @@ func (c *BitmapFilter) Encode(w io.Writer) error {
 	c.mu.RUnlock()
 
 	// Write without holding lock - safe for concurrent reads/writes
-	encoded, err := msgpck.Marshal(data)
+	enc := msgpck.GetStructEncoder[bitmapFilterData]()
+	encoded, err := enc.Encode(&data)
 	if err != nil {
 		return err
 	}
@@ -396,7 +397,8 @@ func ReadBitmapFilter(r io.Reader) (*BitmapFilter, error) {
 	}
 
 	var decoded bitmapFilterData
-	if err := msgpck.UnmarshalStruct(data, &decoded); err != nil {
+	dec := msgpck.GetStructDecoder[bitmapFilterData](false)
+	if err := dec.Decode(data, &decoded); err != nil {
 		return nil, err
 	}
 
@@ -787,7 +789,8 @@ func (col *SortColumn[T]) Encode(w io.Writer) error {
 		MaxDocID: maxDocID,
 	}
 
-	encoded, err := msgpck.Marshal(data)
+	enc := msgpck.GetStructEncoder[sortColumnData[T]]()
+	encoded, err := enc.Encode(&data)
 	if err != nil {
 		return err
 	}
@@ -813,7 +816,8 @@ func ReadSortColumn[T cmp.Ordered](r io.Reader) (*SortColumn[T], error) {
 	}
 
 	var data sortColumnData[T]
-	if err := msgpck.UnmarshalStruct(bytes, &data); err != nil {
+	dec := msgpck.GetStructDecoder[sortColumnData[T]](false)
+	if err := dec.Decode(bytes, &data); err != nil {
 		return nil, err
 	}
 

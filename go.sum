@@ -6,6 +6,12 @@ github.com/davecgh/go-spew v1.1.0 h1:ZDRjVQ15GmhC3fiQ8ni8+OwkZQO4DARzQgrnXU1Liz8
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/freeeve/msgpck v0.1.4 h1:5cJ2f4b0VyWvHV31iaHvoxxqTjKTMhxTsaRaAKroMpw=
 github.com/freeeve/msgpck v0.1.4/go.mod h1:5z7KFctIOZV6bZIleuGOCOZxR9cX6Jc7ndqrDdTJDL8=
+github.com/freeeve/msgpck v0.3.0 h1:29Y+MLEGutEH/naI4lC50P7W43xBWLs/20a7GCIuIHY=
+github.com/freeeve/msgpck v0.3.0/go.mod h1:5z7KFctIOZV6bZIleuGOCOZxR9cX6Jc7ndqrDdTJDL8=
+github.com/freeeve/msgpck v0.3.1 h1:EyDBTZ0uFMkLY8wyR3O1wSeu8s2MZtATmlkoeEg6+Dg=
+github.com/freeeve/msgpck v0.3.1/go.mod h1:5z7KFctIOZV6bZIleuGOCOZxR9cX6Jc7ndqrDdTJDL8=
+github.com/freeeve/msgpck v0.3.2 h1:FN3zmWd5/oJO6okbvdwFXyO3PTZAPBpGLMuU5vZT8B0=
+github.com/freeeve/msgpck v0.3.2/go.mod h1:5z7KFctIOZV6bZIleuGOCOZxR9cX6Jc7ndqrDdTJDL8=
 github.com/mschoch/smat v0.2.0 h1:8imxQsjDm8yFEAVBe7azKmKSgzSkZXDuKkSq9374khM=
 github.com/mschoch/smat v0.2.0/go.mod h1:kc9mz7DoBKqDyiRL7VZN8KvXQMWeTaVnttLRXOlotKw=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=
