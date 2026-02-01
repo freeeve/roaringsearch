@@ -8,7 +8,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/RoaringBitmap/roaring"
+	"github.com/RoaringBitmap/roaring/v2"
 )
 
 const (

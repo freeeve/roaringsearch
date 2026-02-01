@@ -5,7 +5,7 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/RoaringBitmap/roaring"
+	"github.com/RoaringBitmap/roaring/v2"
 )
 
 // SearchResult holds search results with scoring information.

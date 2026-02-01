@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/RoaringBitmap/roaring"
+	"github.com/RoaringBitmap/roaring/v2"
 )
 
 func BenchmarkFilterAndSort100M(b *testing.B) {

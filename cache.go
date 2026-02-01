@@ -10,7 +10,7 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/RoaringBitmap/roaring"
+	"github.com/RoaringBitmap/roaring/v2"
 )
 
 // CachedIndex is a memory-efficient index that keeps only frequently used
